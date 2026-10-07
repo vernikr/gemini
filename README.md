@@ -18,7 +18,21 @@ a compact consolidated result — the agent's own context stays clean.
 
 ## Status
 
-**Planning complete (stages 1–4). Development starts at M0 — see the plan.**
+**Stages 1–4 done; M0–M3 shipped → v0.2.0.** Router core lives in `gemini-router`
+(v0.1.0, pinned git dep). This repo: MCP server (stdio + HTTP daemon), 4 tools,
+chunking pipeline with recursive consolidation, 3-level progress funnel, rotating
+logs + JSONL audit, terminal CLI. 34 tests green, no network needed.
+Next: **M4 deployment to the VPS** (needs the owner's machine — see plan).
+
+## Development
+
+```bash
+uv sync --extra dev    # gemini-router is a private git dep → GitHub auth required
+                       # (GH_PAT_READ secret in CI; locally: git insteadOf with a PAT)
+uv run pytest -q       # 34 tests: chunker, pipeline, tools/server, logging — all faked
+uv run ruff check src tests
+GEMINI_API_KEYS=... uv run gemini-mcp quota|calls|logs|prune|doctor
+```
 
 | Stage | Artifact |
 |---|---|

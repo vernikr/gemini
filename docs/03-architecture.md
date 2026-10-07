@@ -82,16 +82,15 @@ gemini-mcp/
 ├── config.yaml               # all tunables (limits, chain, chunking, retention, thinking default)
 ├── .env.example              # GEMINI_API_KEYS, GEMINI_MCP_TOKEN, GEMINI_ROUTER_STATE, …
 ├── src/gemini_mcp/
-│   ├── server.py             # FastMCP app: tools, resources, auth; run(stdio|http)
+│   ├── server.py             # MCPServer (SDK v2): tools, resource, REST routes, bearer middleware
 │   ├── tools.py              # analyze_large, gemini_generate, quota_status, router_logs
 │   ├── pipeline.py           # measure → plan → budget pre-flight → chunk loop → consolidate
 │   ├── chunker.py            # token-aware splitter (paragraph>sentence>line), overlap windows
 │   ├── prompts.py            # chunk service marker, consolidation & recursive-consolidation templates
 │   ├── progress.py           # RouterEvent+pipeline stages → report_progress / ctx.info / trace
-│   ├── logging_setup.py      # rich console + RotatingFileHandler + JSONL sink + redaction filter
-│   ├── rest.py               # Starlette routes mounted on the daemon: /v1/quota /v1/complete /healthz
-│   ├── retention.py          # startup+daily prune: JSONL days, audit rows/MB, cache TTL
-│   └── cli.py                # gemini-mcp serve|stdio|logs|quota|calls|doctor
+│   ├── logging_setup.py      # rich console + RotatingFileHandler + JSONL audit + redaction + retention
+│   └── cli.py                # gemini-mcp serve|stdio|quota|calls|logs|prune|doctor
+│                             # (REST /v1/* + /healthz live in server.py custom routes)
 ├── scripts/                  # setup_server.sh (idempotent), run_remote.sh (rsync deploy), gen_token.sh
 ├── tests/                    # pipeline & chunker units (fake token counter), MCP e2e via in-memory client
 └── docs/                     # this stage set + blockers + freebuff-wiring.md
@@ -156,7 +155,9 @@ overflow tiers if opted in.
 **Progress mapping** (FR-E1..3): every RouterEvent/pipeline stage →
 `ctx.report_progress(pct, message)` (when progressToken present) AND `ctx.info(message)`
 AND append to `progress_trace`. Percent budget: measure 5%, plan 5%, chunks 80% (i/M),
-consolidation 10% (per round).
+consolidation 10% (per round). Note: MCP v2 deprecates the logging capability
+(SEP-2577) — `ctx.info` is still emitted for v1-compatible clients; the progress
+message channel is primary, the embedded trace is the floor.
 
 ## 5. Logging & eviction ("beautiful, terminal-accessible, self-cleaning")
 
@@ -211,7 +212,7 @@ Freebuff wiring (`~/.agents/mcp.json`, home-level per bug #957):
 | Choice | Why | Rejected alternative |
 |---|---|---|
 | Python 3.12 + uv | server standard, external-consumer compat, `--no-cache` disk discipline | TS/Bun (ecosystem split on this VPS), Go (faster cold start but team/repo context is Python) |
-| Official `mcp` SDK (FastMCP) | one codebase → stdio + streamable HTTP; built-in progress/logging notifications; custom Starlette routes for REST | hand-rolled JSON-RPC, mcp-python alternatives |
+| Official `mcp` SDK **v2** (`MCPServer`; FastMCP was renamed in 2.x) | one codebase → stdio + streamable HTTP; progress notifications with message; `custom_route` for REST; `call_tool` for tests | hand-rolled JSON-RPC, pinning `mcp<2` |
 | `httpx` (async, HTTP/2) | concurrency for pacing + countTokens pre-flight; fine-grained timeouts | `requests` (sync; inherited code wraps it in facade) |
 | SQLite (stdlib, WAL) | zero-dep durable multi-process ledger; 20 GB disk, tiny write rate | JSON+filelock (fragile), Redis/Postgres (RAM/ops cost on 1 GB box) |
 | `pydantic` v2 | config validation, result schemas (already an mcp dep) | dataclasses-only (weaker config DX) |

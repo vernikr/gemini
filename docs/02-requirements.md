@@ -132,7 +132,9 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 - **FR-E1** MUST emit progress via MCP `notifications/progress` when the client supplied
   a `progressToken` (percent + stage message).
 - **FR-E2** MUST ALSO emit each stage via MCP logging notifications
-  (`notifications/message`, level info) for clients without progress support.
+  (`notifications/message`, level info) for clients without progress support. (MCP v2
+  deprecates the logging capability — SEP-2577; kept for v1-compatible clients, the
+  progress `message` channel is primary.)
 - **FR-E3** MUST embed the full `progress_trace[]` (stage, ts, detail) in the final
   result meta — the guaranteed floor when a client shows neither (b03).
 - **FR-E4** App logs: pretty console (rich) → stderr (journald picks it up) + rotating

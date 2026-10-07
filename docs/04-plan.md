@@ -5,14 +5,14 @@ Commits + push to origin + artifact listed below. Chat report after each: PM-sty
 
 ## Milestones
 
-### M0 · Scaffolding (both repos)
+### M0 · Scaffolding (both repos) — ✅ done 2026-10-08
 - pyproject (uv), src layouts per 03 §2, `.gitignore`, CI workflow (ruff + pytest, free runners),
   AGENTS.md per repo, config schemas (pydantic) with defaults from 03 §8, `.env.example`.
 - **Artifact**: green CI badges on empty-ish skeletons; `uv run pytest` passes trivially.
 - Acceptance: `uv sync` works from clean clone on py3.12; `gemini-router --help` /
   `gemini-mcp --help` run.
 
-### M1 · gemini-router core → tag v0.1.0
+### M1 · gemini-router core → tag v0.1.0 — ✅ done, v0.1.0 tagged & pushed (43 tests green)
 - ledger.py (schema 03 §3, WAL, PT-day + rolling windows, 'planned' rows, prune),
   gemini.py (generateContent/countTokens/listModels, thinking_level, 3.x param rules),
   routing.py (extracted tldr taxonomy + key×model selection + cooldowns + overflow tiers),
@@ -24,7 +24,7 @@ Commits + push to origin + artifact listed below. Chat report after each: PM-sty
 - **Artifact**: v0.1.0 tag; SPEC.md updated to as-built; CLI sample outputs in docs.
 - Acceptance: FR-C1..C12 unit-covered; `gemini-router doctor` explains every failure mode.
 
-### M2 · gemini-mcp server skeleton (daemon + stdio) → gemini-mcp v0.1.0
+### M2 · gemini-mcp server skeleton (daemon + stdio) → gemini-mcp v0.1.0 — ✅ done (shipped together with M3 as v0.2.0: SDK v2 `MCPServer`, 4 tools, bearer middleware, REST `/v1/*`, CLI; daemon smoke-tested: 401/200/healthz)
 - server.py (FastMCP, both transports, bearer auth on HTTP), tools.py (all four tools),
   logging_setup.py (rich + rotation + JSONL + redaction), retention.py, rest.py
   (/v1/quota, /v1/complete, /healthz), progress.py, cli.py (serve/stdio/logs/quota/calls/doctor).
@@ -33,7 +33,7 @@ Commits + push to origin + artifact listed below. Chat report after each: PM-sty
 - **Artifact**: local e2e transcript (mocked router) committed under `tests/fixtures/`.
 - Acceptance: same behavior via stdio and HTTP; daemon down ⇒ stdio still works (D4).
 
-### M3 · Chunking pipeline → v0.2.0
+### M3 · Chunking pipeline → v0.2.0 — ✅ done (markers, overlap, recursive consolidation, budget pre-check, gap-tolerant consolidation; 34 tests green, lint clean)
 - chunker.py (token-aware, boundary hierarchy, overlap windows), prompts.py (chunk marker,
   consolidation, recursive reduce), pipeline.py (measure→plan→pre-flight→loop→consolidate→
   assemble, FR-D1..D8), request_id idempotency, partial-failure policy.
