@@ -126,6 +126,13 @@ class Pipeline:
     async def _complete(self, p: AnalyzeParams, req: RouterRequest, on_ev) -> RouterResult:
         res = await self.router.complete(req, on_event=on_ev)
         self._account(res)
+        if req.kind != "count" and not (res.text or "").strip():
+            # v0.1.1 live-smoke regression: 3.x thinking tokens count toward
+            # max_output_tokens — starvation returns HTTP-ok with empty text.
+            raise RouterError(
+                f"empty answer from {res.model} "
+                f"(finish={getattr(res, 'finish_reason', None)}): thinking tokens likely "
+                "consumed max_output_tokens — raise it and retry")
         return res
 
     async def _chunked(self, p: AnalyzeParams, body: str, measured: int,

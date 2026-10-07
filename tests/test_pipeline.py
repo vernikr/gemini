@@ -137,3 +137,23 @@ async def test_thinking_default_and_override():
     assert router.calls[0].thinking_level == "high"              # app default
     await _run(router, cfg, AnalyzeParams(task="t", body="tiny2", thinking_level="low"))
     assert router.calls[1].thinking_level == "low"               # per-request override
+
+
+async def test_empty_answer_aborts_by_default():
+    """Live-smoke regression (router v0.1.1): thinking-starved empty text fails loudly."""
+    router = FakeRouter()
+    router.empty_chunks = {2}
+    cfg = make_app_cfg(chunk_threshold_tokens=100, chunk_size_tokens=200)
+    with pytest.raises(RouterError, match="empty answer"):
+        await _run(router, cfg, AnalyzeParams(task="t", body=big_body(200)), FakeCtx())
+
+
+async def test_empty_answer_continue_with_gap():
+    router = FakeRouter()
+    router.empty_chunks = {1}
+    cfg = make_app_cfg(chunk_threshold_tokens=100, chunk_size_tokens=200,
+                       fail_on_chunk_error=False)
+    text, meta = await _run(router, cfg, AnalyzeParams(task="t", body=big_body(200)),
+                            FakeCtx())
+    assert meta["chunks"]["failed"] == [1]
+    assert "Parts [1]" in router.calls[-1].prompt                # gap noted to the model

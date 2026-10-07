@@ -19,6 +19,7 @@ class FakeRouter:
         self.calls: list = []
         self.count_calls: list[str] = []
         self.fail_chunks = set(fail_chunks)
+        self.empty_chunks: set[int] = set()   # starvation sim: ok result, empty text
         self.raise_quota = raise_quota
         self.budgets = budgets if budgets is not None else [
             {"model": "gemini-3.8-flash", "rpd_left": 100, "rpm_wait_s": 0,
@@ -47,6 +48,8 @@ class FakeRouter:
                 raise RouterError("simulated chunk failure")
         if req.kind == "chunk":
             text = f"analysis-of-chunk-{mm.group(1)}-of-{mm.group(2)}"
+            if mm and int(mm.group(1)) in self.empty_chunks:
+                text = ""                     # thinking-starved answer (router v0.1.1)
         elif req.kind == "consolidate":
             text = "CONSOLIDATED[" + str(req.prompt.count("--- ANALYSIS OF PART")) + "]"
         else:
@@ -58,7 +61,8 @@ class FakeRouter:
         return RouterResult(text=text, model="gemini-3.8-flash", key_id="fake",
                             tokens_in=max(1, len(req.prompt) // 4), tokens_out=6,
                             latency_s=0.01, cached=False, request_id=req.request_id,
-                            quota_after=self.budgets)
+                            quota_after=self.budgets,
+                            finish_reason="STOP" if text else "MAX_TOKENS")
 
     def model_budgets(self, models=None, now=None):
         return list(self.budgets)

@@ -244,7 +244,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gemini-router", git = "https://github.com/vernikr/gemini-router.git?rev=v0.1.0" },
+    { name = "gemini-router", git = "https://github.com/vernikr/gemini-router.git?rev=v0.1.1" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.9" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
@@ -259,8 +259,8 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "gemini-router"
-version = "0.1.0"
-source = { git = "https://github.com/vernikr/gemini-router.git?rev=v0.1.0#43c5380ae1bcb7c47ae1f6df45848623e5f1cb81" }
+version = "0.1.1"
+source = { git = "https://github.com/vernikr/gemini-router.git?rev=v0.1.1#52617599bc8a9a35a0e04979a2cfb537631dee8a" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },

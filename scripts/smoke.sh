@@ -29,11 +29,14 @@ echo "== 3/4 one tiny generate (1 RPD; thinking low to keep it cheap) =="
 "$BIN/python" - <<'PY'
 from gemini_router import Config, Router, RouterRequest
 r = Router(Config.load())
+# NO small max_output_tokens here: 3.x thinking tokens count toward the cap —
+# a 16-token cap starves the visible answer (found live 2026-10-08, router v0.1.1).
 res = r.complete_sync(RouterRequest(
     prompt="Reply with exactly one word: OK",
-    kind="single", source="smoke", thinking_level="low", max_output_tokens=16))
+    kind="single", source="smoke", thinking_level="low"))
 print(f"model={res.model} key={res.key_id} cached={res.cached} "
-      f"tokens_in={res.tokens_in} tokens_out={res.tokens_out} text={res.text!r}")
+      f"tokens_in={res.tokens_in} tokens_out={res.tokens_out} "
+      f"thought={res.tokens_thought} finish={res.finish_reason} text={res.text!r}")
 PY
 
 echo
