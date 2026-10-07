@@ -34,16 +34,28 @@ fi
 chmod 600 "$ENVF"
 
 # Key import (decision D2: shared pool with external-consumer). Retried on EVERY run while
-# GEMINI_API_KEYS is still empty; accepts GEMINI_API_KEYS or GEMINI_API_KEY in source.
+# GEMINI_API_KEYS is still empty. Source vars tried in order:
+#   GEMINI_API_KEYS → GEMINI_API_KEY → LLM_API_KEY (only when LLM_PROVIDER contains
+#   "gemini" — external-consumer uses generic provider names; canonical name here is
+#   GEMINI_API_KEYS; M6 migration will unify external-consumer onto it).
 if ! grep -qE '^GEMINI_API_KEYS=..*' "$ENVF"; then
-  keyline="$(grep -hE '^GEMINI_API_KEYS?=.+' "$EXTERNAL_ENV" 2>/dev/null | head -1 || true)"
+  src=""
+  for pat in '^GEMINI_API_KEYS=..*' '^GEMINI_API_KEY=..*'; do
+    src="$(grep -hE "$pat" "$EXTERNAL_ENV" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+    [[ -n $src ]] && break
+  done
+  if [[ -z $src ]] && grep -qiE '^LLM_PROVIDER=.*gemini' "$EXTERNAL_ENV" 2>/dev/null; then
+    src="$(grep -hE '^LLM_API_KEY=.+' "$EXTERNAL_ENV" 2>/dev/null | head -1 | cut -d= -f2- || true)"
+    [[ -n $src ]] && echo "note: key taken from external-consumer LLM_API_KEY (LLM_PROVIDER=gemini)"
+  fi
   sed -i '/^GEMINI_API_KEYS=/d' "$ENVF"
-  if [[ -n $keyline ]]; then
-    echo "GEMINI_API_KEYS=${keyline#*=}" >> "$ENVF"
+  if [[ -n $src ]]; then
+    echo "GEMINI_API_KEYS=$src" >> "$ENVF"
     echo "imported Gemini key(s) from $EXTERNAL_ENV (shared pool)"
   else
     echo "GEMINI_API_KEYS=" >> "$ENVF"
     echo "WARNING: no Gemini keys found in $EXTERNAL_ENV" >&2
+    echo "         (tried GEMINI_API_KEYS / GEMINI_API_KEY / LLM_API_KEY+LLM_PROVIDER=gemini)" >&2
     echo "         → put them into $ENVF as GEMINI_API_KEYS=key1,key2" >&2
   fi
 fi
