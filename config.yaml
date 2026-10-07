@@ -1,0 +1,44 @@
+# gemini-mcp default config (docs/03-architecture.md §8).
+# Secrets live in .env only: GEMINI_API_KEYS, GEMINI_MCP_TOKEN, GEMINI_ROUTER_STATE.
+
+router:
+  chain: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash,
+          gemini-3-flash-preview]
+  overflow_tiers: [gemini-3.5-flash-lite, gemma-auto]   # only when a request opts in
+  limits_per_key_model: {rpd: 20, rpm: 5, tpm: 250000}
+  overflow_limits: {rpd: 500, rpm: 15, tpm: 250000}
+  limits_overrides: {}
+  quota_day_tz: America/Los_Angeles
+  retry: {max: 3, backoff_base_s: 5, jitter_max_s: 2, provider_timeout_s: 120,
+          request_delay_s: 2}
+  wait: {enabled_default: true, max_s: 65, poll_s: 2}   # minute-scale gates (FR-C13)
+  window_s: 60
+  models_refresh_h: 12
+  cache_ttl_h: 24
+
+pipeline:
+  chunk_threshold_tokens: 200000
+  chunk_size_tokens: 180000
+  overlap_ratio: 0.10
+  merge_tail_ratio: 0.05
+  consolidation_fanin: 6
+  fail_on_chunk_error: true
+  max_result_chars: 12000
+
+thinking:
+  default: high            # per-request override always wins
+
+server:
+  http_bind: 127.0.0.1     # b06: loopback only; remote via SSH tunnel / cloudflared
+  http_port: 8790
+  mcp_path: /mcp
+
+logging:
+  dir: logs
+  max_bytes: 10485760      # app.log 10 MB × 7 backups
+  backups: 7
+  jsonl_keep_days: 14      # requests-*.jsonl eviction
+  audit_keep_days: 30
+  audit_max_mb: 50
+  dump_bodies: false       # true → full prompts/results in JSONL (debug only)
+  level: INFO
