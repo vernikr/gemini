@@ -8,10 +8,14 @@
 #   bash scripts/run_remote.sh status   # systemctl status + quota table
 #   bash scripts/run_remote.sh logs     # tail daemon journal + app.log
 #
-# Env: VPS_USER (default agent), VPS_HOST (default YOUR_VPS_HOST).
+# Env: VPS_USER — SSH login user (default agent); APP_USER — service/venv owner on the
+# server (default = VPS_USER; e.g. login as root but run the service as agent:
+# VPS_USER=root APP_USER=agent bash scripts/run_remote.sh setup). VPS_HOST default
+# YOUR_VPS_HOST. Non-standard SSH port/keys: configure via ~/.ssh/config for the host.
 set -euo pipefail
 
 VPS_USER="${VPS_USER:-agent}"
+APP_USER="${APP_USER:-$VPS_USER}"
 VPS_HOST="${VPS_HOST:-YOUR_VPS_HOST}"
 DEST="$VPS_USER@$VPS_HOST"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # gemini-mcp repo
@@ -37,18 +41,18 @@ sync_both() {
 case "$cmd" in
   setup|deploy)
     sync_both
-    ssh -t "$DEST" "sudo APP_USER=$VPS_USER bash /opt/apps/gemini-mcp/scripts/setup_server.sh"
+    ssh -t "$DEST" "sudo APP_USER=$APP_USER bash /opt/apps/gemini-mcp/scripts/setup_server.sh"
     ;;
   smoke)
-    ssh -t "$DEST" "sudo -u $VPS_USER bash /opt/apps/gemini-mcp/scripts/smoke.sh"
+    ssh -t "$DEST" "sudo -u $APP_USER bash /opt/apps/gemini-mcp/scripts/smoke.sh"
     ;;
   status)
     ssh -t "$DEST" "systemctl --no-pager status gemini-mcp.service | head -8; \
-      sudo -u $VPS_USER bash -c 'set -a; . /opt/apps/gemini-mcp/.env; set +a; \
+      sudo -u $APP_USER bash -c 'set -a; . /opt/apps/gemini-mcp/.env; set +a; \
       cd /opt/apps/gemini-mcp && .venv/bin/gemini-mcp quota'"
     ;;
   logs)
-    ssh -t "$DEST" "journalctl -u gemini-mcp -n 40 --no-pager; \
+    ssh -t "$DEST" "sudo journalctl -u gemini-mcp -n 40 --no-pager; \
       echo ---; tail -n 30 /opt/apps/gemini-mcp/logs/app.log 2>/dev/null || true"
     ;;
   *)
