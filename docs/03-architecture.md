@@ -64,8 +64,8 @@ router = Router.from_env()                     # or Router(Config(...))
 result = await router.complete(
     RouterRequest(prompt=…, system=…, thinking_level="high", output_format="json",
                   max_output_tokens=8192, kind="chunk", request_id=…, overflow="off",
-                  source="mcp"),
-    on_event=lambda e: …)                      # RouterEvent(stage, pct, model, detail)
+                  wait=True, source="mcp"),    # wait: minute-scale gates (FR-C13)
+    on_event=lambda e: …)                      # RouterEvent(stage, pct, model, wait_s, detail)
 # RouterResult(text, model, key_id, tokens_in, tokens_out, latency_s, cached, events[], quota_after)
 sync_facade: router.complete_sync(…)           # for external-consumer migration (M6)
 ```
@@ -101,7 +101,7 @@ gemini-mcp/
 
 ```sql
 CREATE TABLE calls(              -- one row per Gemini attempt (incl. failures)
-  id INTEGER PRIMARY KEY, ts TEXT NOT NULL,          -- UTC ISO
+  id INTEGER PRIMARY KEY, ts REAL NOT NULL, ts_iso TEXT NOT NULL,  -- unix epoch + UTC ISO (human)
   request_id TEXT, source TEXT NOT NULL,             -- mcp|cli|rest|tldr
   kind TEXT NOT NULL,                                -- single|chunk|consolidate|count
   key_id TEXT NOT NULL, model TEXT NOT NULL,         -- key_id = sha256(key)[:8]
@@ -130,8 +130,11 @@ Budget queries (single source of truth, no in-memory counters that can drift):
 ## 4. Key sequences
 
 **Single-shot** (`gemini_generate` / body fits): measure (countTokens) → pick key×model
-(max budget, chain order, not cooled down) → pre-flight RPD/RPM/TPM → cache probe →
-generate (thinking_level) → account from `usageMetadata` → ledger row → result+meta.
+(max budget, chain order, not cooled down) → pre-flight RPD/RPM/TPM → **wait gate
+(FR-C13): if blocked by RPM/TPM/short cooldown and `wait` enabled and eta ≤ `wait.max_s`
+→ emit `waiting` countdown events, poll `wait.poll_s`; otherwise next candidate** →
+cache probe → generate (thinking_level) → account from `usageMetadata` → ledger row →
+result+meta.
 On 429/5xx: taxonomy → cooldown/next model (FR-C4/5). Exhausted → FR-B8 error or
 overflow tiers if opted in.
 
@@ -230,6 +233,8 @@ router:
   limits_overrides: {gemini-3.5-flash-lite: {rpd: 500, rpm: 15}}
   quota_day_tz: America/Los_Angeles
   retry: {max: 3, backoff_base_s: 5, provider_timeout_s: 120, request_delay_s: 2}
+  wait: {enabled_default: true, max_s: 65, poll_s: 2}    # minute-scale gates only (FR-C13)
+  window_s: 60                                            # sliding RPM/TPM window length
   models_refresh_h: 12
   cache_ttl_h: 24
 pipeline:
@@ -259,3 +264,4 @@ Env (`.env`): `GEMINI_API_KEYS` (comma) or `GEMINI_API_KEY_1..10`, `GEMINI_MCP_T
 - D6: Overflow is per-request opt-in (user decision), never automatic → predictable spend.
 - D7: thinking default high is a service config, per-request override wins; gemma ignores it (logged).
 - D8: Chunk service marker is a prompt-template file, editable without code (prompts inline in `prompts.py` as constants + optional `prompts/` dir override).
+- D9: Waiting covers minute-scale gates only (RPM/TPM/short cooldowns, capped at `wait.max_s`); waiting hours for a daily reset inside one tool call is impractical — the caller gets ETAs (progress + FR-B8 error) and decides: retry later or opt into overflow.

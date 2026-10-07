@@ -131,6 +131,7 @@ neither exists in the GitHub copy → the deployed tree is newer than the repo
 | 2 | Gemini keys | **Shared pool** from `/opt/apps/external-consumer/.env` (`GEMINI_API_KEYS`), deploy script reads it; shared quota ledger; `external-consumer` migrates onto the router later |
 | 3 | Repo layout | **Two private repos**: `gemini-router` (lib+CLI, installable from anywhere) + `gemini-mcp` (MCP server, depends on router by tag) |
 | 4 | All Flash quotas exhausted | **Hard stop by default** (structured error: remaining per model + reset ETA). Caller may opt in per request to overflow: `gemini-3.5-flash-lite` → best available `gemma-*` |
+| 5 | Minute-limit reset waiting (user follow-up, same day) | **Wait by default**: per-request `wait_for_minute_limits` covers RPM/TPM/short-cooldown gates (≤ `wait.max_s`); progress reports remaining wait seconds to the agent. Daily RPD resets are never waited on — hard stop / overflow unchanged |
 
 ## 6. Risks & unknowns → tracked in `docs/blockers/`
 

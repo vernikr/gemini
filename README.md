@@ -10,7 +10,8 @@ a compact consolidated result — the agent's own context stays clean.
 - Over-limit bodies: split into overlapping chunks, each marked `[CHUNK N/M]`, analyzed
   separately, then consolidated (recursively if needed).
 - `thinking_level` default **high**, per-request override; opt-in overflow
-  (`flash-lite → gemma`) when the daily quota is gone; hard stop otherwise.
+  (`flash-lite → gemma`) when the daily quota is gone; hard stop otherwise; per-request
+  wait policy for minute-limit resets (default: wait, countdown reported in progress).
 - Deep progress to the caller (MCP progress + logging notifications + embedded trace),
   rotating disk logs, `gemini-mcp quota|logs|calls|doctor` in the terminal.
 - Transports: SSH-stdio (primary) and streamable HTTP daemon (`127.0.0.1`, bearer).

@@ -19,7 +19,8 @@ Commits + push to origin + artifact listed below. Chat report after each: PM-sty
   events.py, errors.py (FR-B8 payload), cli.py (quota/models/calls/prune/doctor), sync facade.
 - Tests: respx-mocked HTTP (b01): chain fallback on 404, 429→cooldown→next model,
   RPD/RPM/TPM gating incl. cross-process (two Router instances, one file), cache hit,
-  overflow opt-in, PT-day rollover, extract_json suite (ported from tldr tests).
+  overflow opt-in, wait policy (wait-vs-skip on RPM gate, countdown events, cap),
+  PT-day rollover, extract_json suite (ported from tldr tests).
 - **Artifact**: v0.1.0 tag; SPEC.md updated to as-built; CLI sample outputs in docs.
 - Acceptance: FR-C1..C12 unit-covered; `gemini-router doctor` explains every failure mode.
 
@@ -52,7 +53,8 @@ Commits + push to origin + artifact listed below. Chat report after each: PM-sty
 - **Artifact**: doctor output + quota table from the live server; Freebuff session check
   (user sends one `analyze_large` from Freebuff; we inspect ledger/JSONL together).
 - Acceptance: BR6 compliance checklist signed off (ports/ufw/external-service untouched, MemoryMax
-  observed via systemd-cgtop, disk added < 200 MB); scenario G5–G7 live.
+  observed via systemd-cgtop, disk added < 200 MB); scenarios G5–G8 live (wait countdown
+  visibility in Freebuff recorded per b03 findings).
 
 ### M5 · Hardening & DX → both repos v1.0.0
 - Overflow tiers live-tested (1 lite call), retention eviction live-tested (fake old
@@ -77,8 +79,8 @@ M5 after M4 evidence. M6 anytime after M5 (independent repo, no rush).
 
 ## Verification matrix (requirement → milestone)
 
-FR-B*: M2/M3 · FR-C*: M1 · FR-D*: M3 · FR-E*: M2 (E4-E8 M2/M4) · FR-F*: M0/M4 ·
-BR1-4: M4/M5 · BR5: M6 · BR6: M4 checklist · G1-G7: M3 (mocks) + M4 (live).
+FR-B*: M2/M3 · FR-C*: M1 (C13 wait policy: M1) · FR-D*: M3 · FR-E*: M2 (E4-E8 M2/M4) ·
+FR-F*: M0/M4 · BR1-4: M4/M5 · BR5: M6 · BR6: M4 checklist · G1-G8: M1/M3 (mocks) + M4 (live).
 
 ## Risks → responses
 
@@ -93,6 +95,6 @@ BR1-4: M4/M5 · BR5: M6 · BR6: M4 checklist · G1-G7: M3 (mocks) + M4 (live).
 
 ## Definition of Done (v1.0.0)
 
-G1–G7 pass live; both repos tagged, CI green; README/ops card current; blockers b01–b06
+G1–G8 pass live; both repos tagged, CI green; README/ops card current; blockers b01–b06
 resolved or archived with rationale; user's Freebuff performs one real massive-body
 analysis end-to-end with visible progress and a compact result.

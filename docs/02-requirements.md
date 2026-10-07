@@ -37,6 +37,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   "max_output_tokens": 8192,                     // optional, per chunk & consolidation
   "model": "gemini-3.7-flash",                   // optional pin; skips fallback chain
   "overflow": "off|lite|lite+gemma",             // optional, default: off (hard stop)
+  "wait_for_minute_limits": true,                // optional, default: true — wait out RPM/TPM gates (FR-C13)
   "chunk_tokens": 180000,                        // optional override of chunk_size_tokens
   "overlap_ratio": 0.10,                         // optional override
   "request_id": "caller-side idempotency key",   // optional; replays return cached result
@@ -87,6 +88,15 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 - **FR-C12** CLI MUST provide: `gemini-router quota` (table), `models` (live list +
   chain resolution), `calls` (audit tail), `prune` (retention), `doctor` (config/state/
   connectivity check).
+- **FR-C13** MUST support a per-request wait policy for **minute-scale** gates
+  (RPM/TPM windows, short 429 cooldowns): `wait_for_minute_limits`, default **true**.
+  When enabled and the gate's wait ≤ `wait.max_s`, the router waits in place (poll
+  `wait.poll_s`), emitting `waiting` events with reason and remaining seconds — frontends
+  MUST surface the countdown to the agent (FR-D8, FR-E1..E3). When disabled, or the wait
+  exceeds the cap, routing moves to the next candidate immediately; if no candidate is
+  available without waiting, the FR-B8 error reports `rpm_wait_s`/`tpm_wait_s` per model
+  so the caller can decide. **Daily RPD resets are never waited on** (hours-scale) —
+  hard stop / overflow per FR-C8 applies.
 
 ## D. Chunking pipeline (gemini-mcp)
 
@@ -113,7 +123,9 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   caller prefers all-or-nothing.
 - **FR-D8** Progress stages (each → FR-E1): `received` → `measured` (tokens, plan M) →
   `budget_checked` (spend/remaining) → `chunk i/M dispatched|done` (model, tokens,
-  latency) → `consolidating round r` → `done` (spent, quota_after).
+  latency) → `consolidating round r` → `done` (spent, quota_after). A
+  `waiting (model, reason, eta_s)` stage may interleave before any dispatch (FR-C13);
+  countdown updates are emitted at least every `wait.poll_s`×5.
 
 ## E. Progress & observability
 
@@ -171,3 +183,8 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 6. **Restart**: kill daemon mid-day → counters intact from ledger.
 7. **Ops**: `gemini-mcp quota` / `logs -f` over SSH work while the daemon runs; JSONL
    pruning removes files older than retention.
+8. **Wait policy**: model gated by RPM → `wait_for_minute_limits=true`: request waits,
+   agent sees countdown ("waiting 42s for gemini-3.8-flash RPM window"), then succeeds;
+   `=false`: instantly routed to the next model, or structured error carrying
+   `rpm_wait_s`/`tpm_wait_s` when nothing is available without waiting. Zero spends in
+   both error paths.
