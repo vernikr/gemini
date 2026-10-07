@@ -27,18 +27,26 @@ chmod 770 "$SHARED"
 if [[ ! -f $ENVF ]]; then
   ( umask 077; : > "$ENVF" )
   echo "GEMINI_ROUTER_STATE=$SHARED/state.db" >> "$ENVF"
-  if grep -qE '^GEMINI_API_KEYS=..*' "$EXTERNAL_ENV" 2>/dev/null; then
-    grep -E '^GEMINI_API_KEYS=' "$EXTERNAL_ENV" >> "$ENVF"
-    echo "imported GEMINI_API_KEYS from $EXTERNAL_ENV (shared pool, decision D2)"
-  else
-    echo "GEMINI_API_KEYS=" >> "$ENVF"
-    echo "WARNING: no keys found in $EXTERNAL_ENV — edit $ENVF and fill GEMINI_API_KEYS" >&2
-  fi
   echo "GEMINI_MCP_TOKEN=$(openssl rand -hex 32)" >> "$ENVF"
   chown "$APP_USER:$APP_USER" "$ENVF"
   echo "created $ENVF (chmod 600)"
 fi
 chmod 600 "$ENVF"
+
+# Key import (decision D2: shared pool with external-consumer). Retried on EVERY run while
+# GEMINI_API_KEYS is still empty; accepts GEMINI_API_KEYS or GEMINI_API_KEY in source.
+if ! grep -qE '^GEMINI_API_KEYS=..*' "$ENVF"; then
+  keyline="$(grep -hE '^GEMINI_API_KEYS?=.+' "$EXTERNAL_ENV" 2>/dev/null | head -1 || true)"
+  sed -i '/^GEMINI_API_KEYS=/d' "$ENVF"
+  if [[ -n $keyline ]]; then
+    echo "GEMINI_API_KEYS=${keyline#*=}" >> "$ENVF"
+    echo "imported Gemini key(s) from $EXTERNAL_ENV (shared pool)"
+  else
+    echo "GEMINI_API_KEYS=" >> "$ENVF"
+    echo "WARNING: no Gemini keys found in $EXTERNAL_ENV" >&2
+    echo "         → put them into $ENVF as GEMINI_API_KEYS=key1,key2" >&2
+  fi
+fi
 
 # ---- venv + deps ----
 [[ -d $APP/.venv ]] || sudo -u "$APP_USER" uv venv "$APP/.venv"
@@ -81,8 +89,18 @@ sleep 2
 systemctl --no-pager status gemini-mcp.service | sed -n '1,5p' || true
 
 # ---- offline sanity (no quota spent; online checks live in smoke.sh) ----
-sudo -u "$APP_USER" bash -c "set -a; . '$ENVF'; set +a; cd '$APP' && '$APP/.venv/bin/gemini-mcp' doctor --offline"
-
-echo
-echo "SETUP OK. Daemon: http://127.0.0.1:8790 (bearer in $ENVF → GEMINI_MCP_TOKEN)."
-echo "Next: bash $APP/scripts/smoke.sh   # first real-key run, spends ≤1 RPD"
+if sudo -u "$APP_USER" bash -c "set -a; . '$ENVF'; set +a; cd '$APP' && '$APP/.venv/bin/gemini-mcp' doctor --offline"; then
+  echo
+  echo "SETUP OK. Daemon: http://127.0.0.1:8790 (bearer in $ENVF → GEMINI_MCP_TOKEN)."
+  echo "Next: bash $APP/scripts/smoke.sh   # first real-key run, spends ≤1 RPD"
+else
+  echo
+  echo "SETUP INCOMPLETE — doctor failed (output above). Likely cause: GEMINI_API_KEYS empty."
+  echo "Fix (on the server):"
+  echo "  1) echo 'GEMINI_API_KEYS=<key1,key2>' >> $ENVF   # keys from AI Studio"
+  echo "  2) systemctl restart gemini-mcp && systemctl is-active gemini-mcp"
+  echo "  3) bash $APP/scripts/smoke.sh"
+  echo "Note: without keys the daemon restart-loops by design (fail-fast); it recovers"
+  echo "      automatically within seconds once keys are in $ENVF."
+  exit 1
+fi
