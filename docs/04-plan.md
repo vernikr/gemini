@@ -43,7 +43,7 @@ Commits + push to origin + artifact listed below. Chat report after each: PM-sty
 - **Artifact**: pipeline test report + one synthetic 900k-token run (mocked) transcript.
 - Acceptance: scenarios G1–G4 from 02 pass on mocks; zero-spend guarantee on fail-fast (G3).
 
-### M4 · Deployment on YOUR_VPS_HOST → v0.3.0
+### M4 · Deployment on YOUR_VPS_HOST → v0.3.0 — 🟡 artifacts READY (scripts/ ×4 shellcheck-clean + docs/freebuff-wiring.md); live execution awaits the user's workstation (b05)
 - scripts/: setup_server.sh (idempotent, external network services-safe per 03 §6), run_remote.sh (rsync deploy),
   gen_token.sh; systemd unit; docs/freebuff-wiring.md (A/B snippets + tunnel recipe +
   bug #957 workaround); real-key smoke test script (`scripts/smoke.sh`: listModels →

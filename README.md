@@ -57,6 +57,20 @@ GEMINI_API_KEYS=... uv run gemini-mcp quota|calls|logs|prune|doctor
 Tools: `analyze_large` (chunking pipeline), `gemini_generate` (single shot),
 `quota_status`, `router_logs`.
 
+## Deployment (M4)
+
+From the workstation (sibling checkout of `gemini-router` required next to this repo):
+
+```bash
+bash scripts/run_remote.sh setup    # rsync both repos → venv, .env, systemd unit, doctor
+bash scripts/run_remote.sh smoke    # first real-key run on the VPS (spends ≤1 RPD)
+bash scripts/run_remote.sh status|logs
+```
+
+Freebuff Desktop wiring (SSH-stdio and HTTP-via-tunnel snippets, verification steps):
+[docs/freebuff-wiring.md](docs/freebuff-wiring.md). The daemon never leaves
+`127.0.0.1:8790`; no firewall changes are made (deployment notes compliant).
+
 ## Ops (after M4)
 
 ```bash
