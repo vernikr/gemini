@@ -8,20 +8,20 @@
 #   bash scripts/run_remote.sh status   # systemctl status + quota table
 #   bash scripts/run_remote.sh logs     # tail daemon journal + app.log
 #
-# Env: VPS_USER — SSH login user (default agent); APP_USER — service/venv owner on the
-# server (default = VPS_USER; e.g. login as root but run the service as agent:
-# VPS_USER=root APP_USER=agent bash scripts/run_remote.sh setup). VPS_HOST default
-# YOUR_VPS_HOST. Non-standard SSH port/keys: configure via ~/.ssh/config for the host.
+# Env: VPS_USER — SSH login user (default root: the VPS has NO 'agent' user — verified
+# on live server 2026-10-08); APP_USER — service/venv owner (default = VPS_USER; set
+# APP_USER=<user> later to run under a dedicated non-root user if one is created).
+# VPS_HOST default YOUR_VPS_HOST. Non-standard SSH port/keys: via ~/.ssh/config for host.
 set -euo pipefail
 
-VPS_USER="${VPS_USER:-agent}"
+VPS_USER="${VPS_USER:-root}"
 APP_USER="${APP_USER:-$VPS_USER}"
 VPS_HOST="${VPS_HOST:-YOUR_VPS_HOST}"
 DEST="$VPS_USER@$VPS_HOST"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # gemini-mcp repo
 ROUTER_LOCAL="$(dirname "$HERE")/gemini-router"                  # sibling checkout
-# NOTE: --rsync-path="sudo rsync" needs the remote user to run sudo non-interactively
-# for rsync, or use VPS_USER=root. The remote .env is NEVER touched (--exclude .env).
+# NOTE: --rsync-path="sudo rsync" needs passwordless sudo for the login user (root: OK).
+# The remote .env is NEVER touched (--exclude .env).
 EXCL=(--exclude .git --exclude .venv --exclude __pycache__ --exclude logs
       --exclude '*.pyc' --exclude .env --exclude state.db --exclude .pytest_cache
       --exclude .ruff_cache)

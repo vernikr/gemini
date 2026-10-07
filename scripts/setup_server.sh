@@ -10,7 +10,7 @@ set -euo pipefail
 APP=/opt/apps/gemini-mcp
 ROUTER_SRC=/opt/apps/gemini-router          # rsync'd source (no GitHub auth on server)
 SHARED=/opt/apps/shared/gemini-router       # shared quota ledger (MCP + future tldr)
-APP_USER="${APP_USER:-agent}"
+APP_USER="${APP_USER:-root}"   # VPS has no dedicated user yet (verified 2026-10-08); service runs as root with unit hardening
 ENVF="$APP/.env"
 EXTERNAL_ENV=/opt/apps/external-consumer/.env
 

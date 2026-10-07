@@ -8,7 +8,7 @@ Date: 2026-10-08 · Inputs: `01`, `02` · Rule: one codebase, two transports, on
 Freebuff Desktop (macOS/Windows)                     VPS YOUR_VPS_HOST (Ubuntu 24.04, 1GB RAM)
 ┌──────────────────────────────┐                    ┌───────────────────────────────────────────┐
 │ ~/.agents/mcp.json           │                    │  systemd: gemini-mcp.service (MemoryMax=350M)│
-│  A) stdio: ssh agent@vps ────┼──── SSH (22) ─────►│  ┌─────────────────────────────────────┐  │
+│  A) stdio: ssh root@vps ────┼──── SSH (22) ─────►│  ┌─────────────────────────────────────┐  │
 │  B) http: 127.0.0.1:8790 ────┼── ssh -L tunnel ──►│  │ gemini-mcp daemon (FastMCP/uvicorn) │  │
 │     (Bearer $GEMINI_MCP_TOKEN)│   (or future CF)   │  │  MCP: /mcp (streamable HTTP)        │  │
 └──────────────────────────────┘                    │  │  REST: /v1/quota /v1/complete       │  │
@@ -187,7 +187,7 @@ offset, RAM). Same tables exposed by MCP `quota_status`/`router_logs` and REST `
                                           # MemoryMax=350M, Restart=on-failure, EnvironmentFile=.env
 ```
 
-- Stdio sessions (path A): `ssh agent@YOUR_VPS_HOST '/opt/apps/gemini-mcp/.venv/bin/gemini-mcp stdio'`
+- Stdio sessions (path A): `ssh root@YOUR_VPS_HOST '/opt/apps/gemini-mcp/.venv/bin/gemini-mcp stdio'`
   — no unit needed; optional sshd slice drop-in caps session RAM (documented, off by default).
 - Ports: only `127.0.0.1:8790` (daemon). **No ufw changes** (loopback isn't filtered);
   443/20724/22 untouched; external-service untouched.
@@ -201,7 +201,7 @@ Freebuff wiring (`~/.agents/mcp.json`, home-level per bug #957):
 { "mcpServers": {
     "gemini": {                       // A) SSH-stdio (primary)
       "command": "ssh",
-      "args": ["agent@YOUR_VPS_HOST", "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"] },
+      "args": ["root@YOUR_VPS_HOST", "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"] },
     "gemini-http": {                  // B) HTTP via pre-opened local tunnel
       "type": "http", "url": "http://127.0.0.1:8790/mcp",
       "headers": { "Authorization": "Bearer $GEMINI_MCP_TOKEN" } } } }

@@ -10,12 +10,12 @@ unreliably — Freebuff bug #957); fully restart Freebuff after editing.
 { "mcpServers": {
     "gemini": {
       "command": "ssh",
-      "args": ["agent@YOUR_VPS_HOST",
+      "args": ["root@YOUR_VPS_HOST",
                "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"]
     } } }
 ```
 
-Requirements: key-based SSH from the workstation (`ssh-copy-id agent@YOUR_VPS_HOST`).
+Requirements: key-based SSH from the workstation (`ssh-copy-id root@YOUR_VPS_HOST`).
 No token needed — the transport is SSH. Each Freebuff session spawns its own process;
 all sessions share `/opt/apps/shared/gemini-router/state.db`, so RPD/RPM accounting
 stays global.
@@ -26,7 +26,7 @@ The daemon listens on `127.0.0.1:8790` only (never exposed publicly — blocker 
 Open a tunnel first, keep it running:
 
 ```bash
-ssh -N -L 8790:127.0.0.1:8790 agent@YOUR_VPS_HOST &
+ssh -N -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST &
 ```
 
 Then in `~/.agents/mcp.json`:

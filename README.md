@@ -48,8 +48,8 @@ GEMINI_API_KEYS=... uv run gemini-mcp quota|calls|logs|prune|doctor
 { "mcpServers": {
     "gemini": {                       // A) SSH-stdio — primary, encrypted, no open ports
       "command": "ssh",
-      "args": ["agent@YOUR_VPS_HOST", "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"] },
-    "gemini-http": {                  // B) HTTP via `ssh -L 8790:127.0.0.1:8790 agent@YOUR_VPS_HOST`
+      "args": ["root@YOUR_VPS_HOST", "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"] },
+    "gemini-http": {                  // B) HTTP via `ssh -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST`
       "type": "http", "url": "http://127.0.0.1:8790/mcp",
       "headers": { "Authorization": "Bearer $GEMINI_MCP_TOKEN" } } } }
 ```
@@ -74,7 +74,7 @@ Freebuff Desktop wiring (SSH-stdio and HTTP-via-tunnel snippets, verification st
 ## Ops (after M4)
 
 ```bash
-ssh agent@YOUR_VPS_HOST
+ssh root@YOUR_VPS_HOST
 sudo systemctl status gemini-mcp          # daemon (HTTP)
 /opt/apps/gemini-mcp/.venv/bin/gemini-mcp quota    # what's left, per key×model
 /opt/apps/gemini-mcp/.venv/bin/gemini-mcp logs -f  # live app log
