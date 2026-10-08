@@ -74,12 +74,24 @@ ssh root@<vps> 'grep GEMINI_MCP_TOKEN /opt/apps/gemini-mcp/.env | cut -d= -f2 | 
 3. On the server: `bash scripts/run_remote.sh logs` → JSONL audit row with
    `source=mcp`, and `journalctl -u gemini-mcp -n 20`.
 
+**Long calls are timeout-safe (v0.3.0).** Clients cut MCP calls after ~30–60s
+(Freebuff did exactly that to a thinking-heavy `analyze_large`), so both compute tools
+hold the call inline only `wait_seconds` (default 25). A longer job returns
+`{status:"running", request_id}` and keeps computing server-side; the agent then calls
+`analyze_result(request_id)` (each call waits up to its own `wait_seconds`) until the
+final `{result, meta}` arrives. After a daemon restart the job registry is empty →
+`analyze_result` returns `{status:"unknown"}` and the original call should be repeated
+with the SAME `request_id`: finished chunks/consolidations come from the router cache,
+so the retry is nearly free. Audit gains `event:"async_submitted"` rows; job lifecycle
+(submit/attach/done/fail/ticket) goes to the app log.
+
 ## Tools cheat-sheet (agent-facing)
 
 | tool | when |
 |---|---|
 | `analyze_large` | any massive body; chunks + consolidates automatically |
 | `gemini_generate` | direct single call (model pinning, thinking_level, json out) |
+| `analyze_result` | fetch/await a background job that returned `status:"running"` |
 | `quota_status` | "which model can take a request right now?" |
 | `router_logs` | recent calls/failures from the server ledger |
 

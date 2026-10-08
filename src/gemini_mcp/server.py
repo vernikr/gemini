@@ -17,7 +17,9 @@ from .config import AppCfg
 from .progress import ProgressEmitter
 from .tools import (
     Deps,
+    _jobbed,
     analyze_large_tool,
+    analyze_result_tool,
     gemini_generate_tool,
     quota_status_tool,
     router_logs_tool,
@@ -34,7 +36,13 @@ reports a countdown via progress). Daily-quota exhaustion is a HARD STOP: you re
 a structured quota_exhausted / plan_budget_insufficient error with per-model budgets,
 wait times and reset ETA — then retry later, shrink the job, or opt in with
 overflow='lite' or 'lite+gemma' (weaker models with large quotas). Call quota_status
-BEFORE big jobs; router_logs shows recent spend."""
+BEFORE big jobs; router_logs shows recent spend.
+
+TIMEOUT-SAFE LONG JOBS: analyze_large/gemini_generate hold the call inline for at most
+wait_seconds (default 25). If the job needs longer, the call returns
+{status:'running', request_id, poll} — the server KEEPS COMPUTING. Then call
+analyze_result(request_id) (each call waits up to its own wait_seconds) until you get
+the final {result, meta}. Never resubmit a running job: quota is already committed."""
 
 
 def build_server(deps: Deps) -> MCPServer:
@@ -54,6 +62,7 @@ def build_server(deps: Deps) -> MCPServer:
         overlap_ratio: float | None = None,
         request_id: str | None = None,
         result_max_chars: int | None = None,
+        wait_seconds: int | None = 25,
         ctx: Context | None = None,
     ) -> dict:
         """Analyze a massive text body with Gemini without polluting your context.
@@ -79,21 +88,29 @@ def build_server(deps: Deps) -> MCPServer:
                 wait ETAs in the error.
             chunk_tokens: override chunk size (tokens).
             overlap_ratio: override chunk overlap (0..0.5).
-            request_id: idempotency key — repeating it returns the cached result.
+            request_id: idempotency key — repeating it returns the cached result;
+                also the handle for the async ticket flow below.
             result_max_chars: cap on the returned consolidated text.
+            wait_seconds: max seconds to hold this call inline (default 25). Longer
+                jobs return {status:'running', request_id} and keep computing
+                server-side — fetch the outcome with analyze_result(request_id).
+                None = block until finished (legacy behavior, risks client timeouts).
 
         Returns: {result, meta{models_used, chunks{count,failed}, requests_spent,
-        cache_hits, quota_after, elapsed_s, truncated, progress_trace}}.
+        cache_hits, quota_after, elapsed_s, truncated, progress_trace}} or
+        {status:'running', request_id, elapsed_s, poll} while the job computes.
         Errors: quota_exhausted / plan_budget_insufficient — JSON with per_model
         budgets, wait seconds and reset_eta_pt.
         """
         emitter = ProgressEmitter(ctx, deps.logger)
-        return await analyze_large_tool(deps, emitter, {
+        return await _jobbed(deps, "analyze_large", emitter, {
             "task": task, "body": body, "thinking_level": thinking_level,
             "output_format": output_format, "max_output_tokens": max_output_tokens,
             "model": model, "overflow": overflow, "wait": wait_for_minute_limits,
             "chunk_tokens": chunk_tokens, "overlap_ratio": overlap_ratio,
-            "request_id": request_id, "result_max_chars": result_max_chars})
+            "request_id": request_id, "result_max_chars": result_max_chars},
+            wait_seconds,
+            lambda em, pr: analyze_large_tool(deps, em, pr))
 
     @srv.tool()
     async def gemini_generate(
@@ -106,20 +123,42 @@ def build_server(deps: Deps) -> MCPServer:
         overflow: Literal["off", "lite", "lite+gemma"] = "off",
         wait_for_minute_limits: bool | None = None,
         request_id: str | None = None,
+        wait_seconds: int | None = 25,
         ctx: Context | None = None,
     ) -> dict:
         """Single-shot quota-aware Gemini completion (payload fits the limits).
 
-        Same routing, thinking_level (default high), wait policy and overflow semantics
-        as analyze_large, without chunking. Returns {result, meta{model, key_id,
-        tokens_in/out, latency_s, cached, quota_after, progress_trace}}.
+        Same routing, thinking_level (default high), wait policy, overflow semantics
+        and async ticket flow (wait_seconds, default 25 → {status:'running',
+        request_id} + analyze_result) as analyze_large, without chunking. Returns
+        {result, meta{model, key_id, tokens_in/out, latency_s, cached, quota_after,
+        progress_trace}}.
         """
         emitter = ProgressEmitter(ctx, deps.logger)
-        return await gemini_generate_tool(deps, emitter, {
+        return await _jobbed(deps, "gemini_generate", emitter, {
             "prompt": prompt, "system": system, "thinking_level": thinking_level,
             "output_format": output_format, "max_output_tokens": max_output_tokens,
             "model": model, "overflow": overflow,
-            "wait_for_minute_limits": wait_for_minute_limits, "request_id": request_id})
+            "wait_for_minute_limits": wait_for_minute_limits,
+            "request_id": request_id},
+            wait_seconds,
+            lambda em, pr: gemini_generate_tool(deps, em, pr))
+
+    @srv.tool()
+    async def analyze_result(
+        request_id: str,
+        wait_seconds: int | None = 25,
+        ctx: Context | None = None,
+    ) -> dict:
+        """Outcome of a background job (analyze_large/gemini_generate returned
+        {status:'running', request_id}). Each call waits up to wait_seconds.
+
+        Returns: the final {result, meta} when done; {status:'running', elapsed_s}
+        while it still computes (call again); {status:'unknown', hint} if the daemon
+        restarted — re-run the ORIGINAL call with the SAME request_id (finished
+        chunks come from the router cache, so the retry is cheap). Quota/plan errors
+        surface exactly as in the sync path (structured JSON)."""
+        return await analyze_result_tool(deps, request_id, wait_seconds)
 
     @srv.tool()
     async def quota_status(ctx: Context | None = None) -> dict:

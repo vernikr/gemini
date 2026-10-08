@@ -76,14 +76,17 @@ async def test_server_registers_tools_with_expected_schema(tmp_path):
     srv = build_server(deps)
     tools = await srv.list_tools()
     assert {t.name for t in tools} == {"analyze_large", "gemini_generate",
-                                       "quota_status", "router_logs"}
+                                       "analyze_result", "quota_status", "router_logs"}
     al = next(t for t in tools if t.name == "analyze_large")
     schema = getattr(al, "inputSchema", None) or al.input_schema
     props = schema["properties"]
     for field in ("task", "body", "thinking_level", "overflow",
                   "wait_for_minute_limits", "chunk_tokens", "overlap_ratio",
-                  "request_id"):
+                  "request_id", "wait_seconds"):
         assert field in props
+    ar = next(t for t in tools if t.name == "analyze_result")
+    ar_schema = getattr(ar, "inputSchema", None) or ar.input_schema
+    assert {"request_id", "wait_seconds"} <= set(ar_schema["properties"])
     assert "Analyze a massive text body" in (getattr(al, "description", "") or "")
 
 

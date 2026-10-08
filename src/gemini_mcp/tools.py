@@ -1,16 +1,22 @@
 """Tool implementations, decoupled from the MCP SDK (testable with a fake ctx).
-Structured quota errors are raised as ToolError carrying the FR-B8 JSON payload."""
+Structured quota errors are raised as ToolError carrying the FR-B8 JSON payload.
+Long jobs run as tracked background tasks (jobs.py): the inline call waits up to
+wait_seconds, then returns a running-ticket instead of dying with the client."""
 from __future__ import annotations
 
 import json
 import logging
 import time
-from dataclasses import dataclass
+import uuid
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import Any
 
 from gemini_router import QuotaExhaustedError, Router, RouterRequest, iso, pt_midnight_ts
 from mcp.server.mcpserver.exceptions import ToolError
 
 from .config import AppCfg
+from .jobs import JobManager
 from .logging_setup import AuditLogger
 from .pipeline import AnalyzeParams, Pipeline, PlanBudgetError
 from .progress import ProgressEmitter
@@ -22,6 +28,41 @@ class Deps:
     app_cfg: AppCfg
     audit: AuditLogger
     logger: logging.Logger
+    jobs: JobManager = field(default_factory=JobManager)
+
+
+async def _jobbed(deps: Deps, tool: str, emitter: ProgressEmitter, params: dict,
+                  wait_seconds: int | None,
+                  runner: Callable[[ProgressEmitter, dict], Any]) -> dict:
+    """wait_seconds None → classic inline run. Otherwise: background job keyed by
+    request_id (generated if absent); inline wait ≤ wait_seconds, then a ticket."""
+    if wait_seconds is None:
+        return await runner(emitter, params)
+    key = params.get("request_id") or f"{tool}-{uuid.uuid4().hex[:12]}"
+    params = {**params, "request_id": key}
+    deps.audit.record({"ts": time.time(), "tool": tool, "request_id": key,
+                       "event": "async_submitted", "wait_seconds": wait_seconds})
+    status, payload = await deps.jobs.submit(
+        key,
+        lambda: runner(ProgressEmitter(None, deps.logger), params),   # detached ctx
+        wait_seconds)
+    if status == "done":
+        return payload
+    if status == "error":
+        raise ToolError(payload.get("detail") or json.dumps(payload, ensure_ascii=False))
+    deps.logger.info("%s %s: ticket issued after %.0fs inline wait",
+                     tool, key, wait_seconds)
+    return payload
+
+
+async def analyze_result_tool(deps: Deps, request_id: str,
+                              wait_seconds: int | None = 25) -> dict:
+    status, payload = await deps.jobs.fetch(request_id, wait_seconds)
+    if status == "done":
+        return payload
+    if status == "error":
+        raise ToolError(payload.get("detail") or json.dumps(payload, ensure_ascii=False))
+    return payload                     # running-ticket or unknown-hint, both dicts
 
 
 def _fail(deps: Deps, emitter: ProgressEmitter, tool: str, request_id: str | None,
