@@ -50,11 +50,12 @@ analyze_result(request_id) (each call waits up to its own wait_seconds) until yo
 the final {result, meta}. Never resubmit a running job: quota is already committed.
 
 REPORTING (required): after every analyze_large/gemini_generate call, tell the user
-in chat in one short line: which model produced the answer (meta.model_final /
-meta.model) and any rough edges from meta.progress_trace — provider 503s and retries,
-model fallbacks, minute-limit waits (with seconds waited), failed chunks. If the call
-errored, say so plainly with the reset ETA. Never silently swallow retries, waits or
-fallbacks."""
+in chat in one short line: the chosen route (meta.route), the thinking level used
+(meta.thinking_level), which model produced the answer (meta.model_final /
+meta.model), and any rough edges from meta.progress_trace — provider 503s and
+retries, model fallbacks, minute-limit waits (with seconds waited), failed chunks.
+If the call errored, say so plainly with the reset ETA. Never silently swallow
+retries, waits or fallbacks."""
 
 
 def build_server(deps: Deps) -> MCPServer:

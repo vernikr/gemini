@@ -134,7 +134,7 @@ async def gemini_generate_tool(deps: Deps, emitter: ProgressEmitter, params: dic
             "tokens_in": res.tokens_in, "tokens_out": res.tokens_out,
             "latency_s": res.latency_s, "cached": res.cached,
             "overflow_tier": res.overflow_tier, "quota_after": res.quota_after,
-            "route": route, "overflow": ovf,
+            "route": route, "overflow": ovf, "thinking_level": req.thinking_level,
             "progress_trace": emitter.trace}
     deps.audit.record({"ts": time.time(), "tool": "gemini_generate",
                        "request_id": res.request_id, "model": res.model,

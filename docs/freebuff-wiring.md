@@ -101,8 +101,9 @@ free tier) and auto-overflows to flash-lite/gemma when Flash budgets run out.
 `route:"best_available"` is the legacy newest-first chain with opt-in overflow
 (hard stop). `thinking_level` default is `medium` (per-request override wins).
 Server instructions REQUIRE the agent to report in chat after every compute call:
-the final model (`meta.model_final`/`meta.model`) and rough edges from
-`meta.progress_trace` — 503s/retries, fallbacks, minute-limit waits, failed chunks.
+route + thinking level used, the final model (`meta.model_final`/`meta.model`) and
+rough edges from `meta.progress_trace` — 503s/retries, fallbacks, minute-limit
+waits, failed chunks.
 
 ## Known client quirks (as-built)
 

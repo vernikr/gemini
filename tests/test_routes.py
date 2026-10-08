@@ -22,6 +22,7 @@ async def test_optimal_route_is_default():
     assert req.overflow == "lite+gemma"          # auto-upgraded on optimal
     assert req.thinking_level == "medium"        # new app default
     assert out["meta"]["route"] == "optimal" and out["meta"]["overflow"] == "lite+gemma"
+    assert out["meta"]["thinking_level"] == "medium"
 
 
 async def test_best_available_route_keeps_legacy():
