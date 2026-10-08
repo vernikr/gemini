@@ -18,7 +18,9 @@ unreliably — Freebuff bug #957); fully restart Freebuff after editing.
 Requirements: key-based SSH from the workstation (`ssh-copy-id root@YOUR_VPS_HOST`).
 No token needed — the transport is SSH. Each Freebuff session spawns its own process;
 all sessions share `/opt/apps/shared/gemini-router/state.db`, so RPD/RPM accounting
-stays global.
+stays global. Since v0.2.1 the process bootstraps itself: it anchors to the project
+root (`/opt/apps/gemini-mcp`) and loads its `.env` (keys, state path) — no wrapper
+commands or env plumbing in the MCP config needed.
 
 ## B) HTTP daemon via SSH tunnel (for other clients / multiple agents)
 

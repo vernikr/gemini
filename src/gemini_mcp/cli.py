@@ -115,7 +115,39 @@ def _run_doctor(app_cfg: AppCfg, router_cfg, args) -> int:
     return rc if rc == 0 and writable else 1
 
 
+def _project_root() -> Path | None:
+    """Project root when running from an installed-layout venv: <root>/.venv/bin/exe."""
+    exe = Path(sys.executable or "")
+    if len(exe.parents) >= 3 and exe.parents[1].name == ".venv":
+        root = exe.parents[2]
+        if (root / "config.yaml").exists() or (root / ".env").exists():
+            return root
+    return None
+
+
+def _bootstrap_env() -> None:
+    """Bare launches (Freebuff → ``ssh root@vps …/gemini-mcp stdio``) start with
+    cwd=$HOME and an empty env: the systemd EnvironmentFile does not apply there.
+    Anchor cwd to the project root and load its .env (without overriding already-set
+    vars) so keys, config.yaml and logs/ behave identically on every transport."""
+    if root := _project_root():
+        try:
+            os.chdir(root)
+        except OSError:
+            pass
+    try:
+        from dotenv import load_dotenv
+    except ImportError:                      # declared in deps; degrade gracefully
+        return
+    env_file = os.environ.get("GEMINI_MCP_ENV_FILE")
+    for cand in ([Path(env_file)] if env_file else []) + [Path.cwd() / ".env"]:
+        if cand.is_file():
+            load_dotenv(cand, override=False)
+            return
+
+
 def main(argv: list[str] | None = None) -> int:
+    _bootstrap_env()
     ap = argparse.ArgumentParser(prog="gemini-mcp",
                                  description="Gemini free-tier MCP gateway")
     ap.add_argument("--config", help="config.yaml path (or GEMINI_MCP_CONFIG)")

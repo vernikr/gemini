@@ -65,7 +65,7 @@ fi
 as_app() { sudo -u "$APP_USER" env VIRTUAL_ENV="$APP/.venv" "$@"; }
 as_app uv pip install --no-cache "$ROUTER_SRC"
 as_app uv pip install --no-cache "mcp[cli]>=1.9" "uvicorn>=0.30" "starlette>=0.37" \
-  "rich>=13.7" "pyyaml>=6.0"
+  "rich>=13.7" "pyyaml>=6.0" "python-dotenv>=1.0"
 # --no-deps: the app's pyproject pins gemini-router via a PRIVATE git URL; the router is
 # already installed from local source above, so we skip dependency resolution entirely.
 as_app uv pip install --no-cache --no-deps "$APP"
