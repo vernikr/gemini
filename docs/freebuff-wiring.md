@@ -92,8 +92,29 @@ so the retry is nearly free. Audit gains `event:"async_submitted"` rows; job lif
 | `analyze_large` | any massive body; chunks + consolidates automatically |
 | `gemini_generate` | direct single call (model pinning, thinking_level, json out) |
 | `analyze_result` | fetch/await a background job that returned `status:"running"` |
+| `file_upload_ticket` | reserve an upload: one-time signed URL + scp path |
+| `analyze_file` | analyze an uploaded file (server extracts text; RTF supported) |
 | `quota_status` | "which model can take a request right now?" |
 | `router_logs` | recent calls/failures from the server ledger |
+
+**File ingest recipe (M4.5, client stays maximally light — D11).** Every compute
+response starts with a one-line `report` field (route · thinking · model · spend ·
+rough edges) — the agent must relay it to chat verbatim; it travels in the payload
+because clients truncate tool descriptions.
+
+```bash
+# 1) agent: file_upload_ticket(filename="paper.rtf", size_bytes=$(stat -f%z paper.rtf))
+# 2) ONE upload command (either channel):
+curl -T paper.rtf '<upload_url from the ticket>'      # via :8790 tunnel, sig = auth
+scp paper.rtf root@<vps>:/opt/apps/gemini-mcp/inbox/<upload_id>   # no tunnel needed
+# 3) agent: analyze_file(task="…", upload_id="…")
+```
+
+Server-side: text-like files go straight into the chunking pipeline; RTF is
+extracted on the server (cp1251 `\'xx` runs, `\uNNNN`, junk groups skipped);
+binaries (pdf/docx/zip) fail fast with `binary_file_needs_conversion` and ZERO
+quota spent (server-side converters are deferred). Inbox retention: `keep_hours`
+(default 24) + `total_cap_mb` (default 500), pruned on each ticket issuance.
 
 **Routes (v0.4.0).** `route:"optimal"` (default) tries models in empirical
 availability order 3.6 → 3.5 → 3-preview → 3.8 → 3.7 (older = less loaded on the

@@ -51,12 +51,23 @@ class RoutingCfg(BaseModel):
         "gemini-3.8-flash", "gemini-3.7-flash"])
 
 
+class IngestCfg(BaseModel):
+    """File ingest (M4.5): inbox dir, caps, ticket TTL, retention (§9)."""
+    dir: str = "inbox"
+    max_file_mb: int = 50
+    ticket_ttl_s: int = 900
+    keep_hours: float = 24
+    total_cap_mb: float = 500
+    scp_target: str = ""           # e.g. root@<vps>; shown in tickets when set
+
+
 class AppCfg(BaseModel):
     pipeline: PipelineCfg = Field(default_factory=PipelineCfg)
     logging: LoggingCfg = Field(default_factory=LoggingCfg)
     server: ServerCfg = Field(default_factory=ServerCfg)
     thinking: ThinkingCfg = Field(default_factory=ThinkingCfg)
     routing: RoutingCfg = Field(default_factory=RoutingCfg)
+    ingest: IngestCfg = Field(default_factory=IngestCfg)
 
 
 def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConfig]:
@@ -68,7 +79,7 @@ def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConf
         raw = yaml.safe_load(Path(p).read_text(encoding="utf-8")) or {}
     app = AppCfg.model_validate({k: raw[k] for k in
                                  ("pipeline", "logging", "server", "thinking",
-                                  "routing") if k in raw})
+                                  "routing", "ingest") if k in raw})
     router_cfg = RouterConfig.load(os.environ.get("GEMINI_ROUTER_CONFIG"),
                                    **raw.get("router", {}))
     return app, router_cfg

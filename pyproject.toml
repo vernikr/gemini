@@ -1,6 +1,6 @@
 [project]
 name = "gemini-mcp"
-version = "0.4.1"
+version = "0.5.0"
 description = "MCP gateway for massive-payload Gemini analysis on the AI Studio free tier: chunking with overlap, consolidation, thinking_level control, deep progress, rotating disk logs"
 readme = "README.md"
 requires-python = ">=3.12"

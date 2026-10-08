@@ -41,6 +41,14 @@ server:
   http_port: 8790
   mcp_path: /mcp
 
+ingest:                    # M4.5 file ingest (§9): tickets, inbox, retention
+  dir: inbox
+  max_file_mb: 50
+  ticket_ttl_s: 900
+  keep_hours: 24
+  total_cap_mb: 500
+  scp_target: root@YOUR_VPS_HOST
+
 logging:
   dir: logs
   max_bytes: 10485760      # app.log 10 MB × 7 backups

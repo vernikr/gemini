@@ -76,7 +76,8 @@ async def test_server_registers_tools_with_expected_schema(tmp_path):
     srv = build_server(deps)
     tools = await srv.list_tools()
     assert {t.name for t in tools} == {"analyze_large", "gemini_generate",
-                                       "analyze_result", "quota_status", "router_logs"}
+                                       "analyze_result", "file_upload_ticket",
+                                       "analyze_file", "quota_status", "router_logs"}
     al = next(t for t in tools if t.name == "analyze_large")
     schema = getattr(al, "inputSchema", None) or al.input_schema
     props = schema["properties"]
