@@ -32,7 +32,10 @@ splits into overlapping chunks (each marked 'CHUNK N/M'), analyzes them, consoli
 and returns ONLY the compact result plus meta (models, spends, quota_after,
 progress_trace) — your context stays clean. thinking_level defaults to 'high';
 wait_for_minute_limits defaults to true (the server waits out RPM/TPM windows and
-reports a countdown via progress). Daily-quota exhaustion is a HARD STOP: you receive
+reports a countdown via progress). Speed knob: thinking_level='high' (default) makes
+the model think long — right for hard analysis; for simple tasks (summaries,
+rewrites, extraction) pass thinking_level='low' and get answers in seconds, not
+minutes. Daily-quota exhaustion is a HARD STOP: you receive
 a structured quota_exhausted / plan_budget_insufficient error with per-model budgets,
 wait times and reset ETA — then retry later, shrink the job, or opt in with
 overflow='lite' or 'lite+gemma' (weaker models with large quotas). Call quota_status
