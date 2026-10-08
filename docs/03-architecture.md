@@ -266,6 +266,8 @@ Env (`.env`): `GEMINI_API_KEYS` (comma) or `GEMINI_API_KEY_1..10`, `GEMINI_MCP_T
 - D7: thinking default high is a service config, per-request override wins; gemma ignores it (logged).
 - D8: Chunk service marker is a prompt-template file, editable without code (prompts inline in `prompts.py` as constants + optional `prompts/` dir override).
 - D9: Waiting covers minute-scale gates only (RPM/TPM/short cooldowns, capped at `wait.max_s`); waiting hours for a daily reset inside one tool call is impractical — the caller gets ETAs (progress + FR-B8 error) and decides: retry later or opt into overflow.
+- D10: File ingest = server-side helper (§10), self-hosted presigned pattern on the existing daemon (HMAC one-time URL) + scp channel — no object storage, no local shim on the client.
+- D11: Keep the client maximally light — all file processing (starting with RTF→text extraction) happens on the server; the client's job is one `curl`/`scp` and one tool call.
 
 ## 10. File ingest — "hand over a file, agent context stays clean" (D10)
 
@@ -299,8 +301,8 @@ Flow:
 
 "Server decides how to split": text-like payload → semantic chunker (§4); any file
 is accepted for upload, the split/convert decision happens server-side at step 3.
-RTF caveat: raw RTF survives splitting (uncompressed) BUT Cyrillic is frequently
-stored as `\'XX`/`\uNNNN` escapes → the model would read markup noise; convert
-first (`textutil -convert txt` on macOS) or add a minimal RTF text extractor later
-(conversions deferred per user). Compressed/binary (docx, pdf, zip) → fail-fast
-until conversion lands.
+RTF: a minimal SERVER-SIDE RTF→text extractor ships with M4.5 (D11: keep the client
+maximally light — zero client-side conversion steps): strip control words, decode
+`\'XX` (Cyrillic codepages) and `\uNNNN` escapes, `\par`/`\line` → newlines.
+Compressed/binary (docx, pdf, zip) → fail-fast `binary_file_needs_conversion`
+until server-side converters land (deferred).

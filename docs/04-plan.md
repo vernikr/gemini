@@ -59,8 +59,10 @@ Commits + push to origin + artifact listed below. Chat report after each: PM-sty
 ### M4.5 · File ingest (analyze_file + self-hosted presigned upload) → ships in v0.3.0
 - Per 03 §10 (D10): tools `file_upload_ticket` + `analyze_file`; `/v1/upload/<id>` route
   (HMAC one-time sig, loopback, size cap); scp alternative into `inbox/`; binary
-  fail-fast sniff (zero spend); retention/caps; tests (sig, expiry, sniff, e2e with
-  FakeRouter); Freebuff prompt recipes (curl via tunnel / scp) in wiring doc.
+  fail-fast sniff (zero spend); retention/caps; minimal SERVER-SIDE RTF→text
+  extractor (D11: client stays light — no textutil/conversion on the Mac); tests
+  (sig, expiry, sniff, rtf-extract, e2e with FakeRouter); Freebuff prompt recipes
+  (curl via tunnel / scp) in wiring doc.
 - Precondition: the "Not connected" drop on real calls diagnosed+fixed (M4) — file
   calls run for minutes, session stability is the foundation.
 - **Artifact**: the user's real RTF (Bank of Russia 6681-У) analyzed end-to-end with
