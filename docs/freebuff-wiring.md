@@ -78,26 +78,17 @@ token literally (bug #957 thread shows both forms working).
 
 ## Known client quirks (as-built)
 
-- **Freebuff's native `type: http` client drops configured `headers`** (verified
-  2026-10-08): every request arrives unauthenticated → 401 → the client walks the OAuth
-  discovery ladder (protected-resource → authorization-server → OIDC
-  `/.well-known/openid-configuration`), and any text/plain 404 on that ladder crashed
-  its JSON parser ('Invalid OAuth error response … Not Found').
-  ⇒ **Use the `mcp-remote` bridge for Freebuff** (same pattern as its Atlassian/Apify
-  entries): it injects the Authorization header itself. Verified 2026-10-08: Freebuff
-  does NOT pass the entry's `env` block to spawned processes (the `${VAR}` substitution
-  in `--header` resolved to a wrong/empty value → 401 → OAuth dance → DCR 404), so put
-  the token LITERALLY in the args:
-  ```jsonc
-  "gemini-http": {
-    "command": "npx",
-    "args": ["-y", "mcp-remote", "http://127.0.0.1:8790/mcp",
-             "--header", "Authorization: Bearer <TOKEN-FROM-SERVER-.env>"]
-  }
-  ```
-  (Caveat: the token is then visible in the local process list — acceptable on a
-  personal Mac; rotate via setup if it ever leaks. Clients that DO honour `env`
-  (curl, SDK scripts, well-behaved launchers) may use the `${GEMINI_MCP_TOKEN}` form.)
+- **All early HTTP-path failures (401 → OAuth dance → discovery crashes) traced to ONE
+  root cause (2026-10-08): a hand-copied bearer token with a stray character (65 chars
+  instead of 64).** Freebuff sent the configured headers correctly all along; the
+  server rightfully 401'd and spec-compliant clients fell into the OAuth ladder.
+  ⇒ Never hand-copy the token: pull it over SSH (`ssh root@<vps> 'grep GEMINI_MCP_TOKEN
+  /opt/apps/gemini-mcp/.env | cut -d= -f2 | tr -d "\n"' | pbcopy) or rewrite mcp.json
+  programmatically. The `mcp-remote` bridge remains the recommended Freebuff entry
+  (proven in sandbox); native `type: http` is equally fine once the token is exact.
+  Server-side hardening shipped anyway (v0.2.2–v0.2.4): `WWW-Authenticate: Bearer` on
+  401, RFC 9728 metadata, JSON (never text/plain) on every `/.well-known/*` and OAuth
+  rung — discovery can no longer crash any client's parser.
   Server-side hardening shipped anyway (v0.2.2/v0.2.3): `WWW-Authenticate: Bearer` on
   401, RFC 9728 metadata on `/.well-known/oauth-protected-resource[/mcp]`, and JSON
   (never text/plain) on every other `/.well-known/*` path — no client can crash on
