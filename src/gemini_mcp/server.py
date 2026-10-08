@@ -218,7 +218,8 @@ class AuthMetadataRoutes:
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "") if scope["type"] == "http" else ""
-        if path.startswith("/.well-known/"):
+        if path.startswith("/.well-known/") or path in ("/register", "/authorize", "/token") \
+                or path.startswith("/oauth"):
             headers = dict(scope.get("headers") or ())
             host = headers.get(b"host", b"localhost").decode("latin-1")
             if path.rstrip("/") in ("/.well-known/oauth-protected-resource",
@@ -228,7 +229,8 @@ class AuthMetadataRoutes:
                     "bearer_methods_supported": ["header"],
                     "resource_documentation": "https://github.com/vernikr/gemini-mcp",
                     "tls_client_certificate_bound_access_tokens": False})
-            else:   # oauth-authorization-server & co: JSON 404, never text/plain
+            else:   # authorization-server meta, DCR /register, /authorize, /token,
+                # OIDC: JSON 404, never text/plain (clients JSON-parse every rung)
                 resp = JSONResponse(
                     {"error": "not_supported",
                      "error_description": "static bearer token auth; no authorization server"},

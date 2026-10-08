@@ -166,6 +166,9 @@ async def test_auth_metadata_routes():
         assert r3.status_code == 404 and r3.json()["error"] == "not_supported"
         r4 = await c.get("/.well-known/openid-configuration")   # OIDC rung of the ladder
         assert r4.status_code == 404 and r4.headers["content-type"].startswith("application/json")
+        for p in ("/register", "/authorize", "/token"):          # DCR/auth rungs
+            rr = await c.post(p, json={})
+            assert rr.status_code == 404 and rr.json()["error"] == "not_supported"
         assert (await c.get("/healthz")).status_code == 200    # passthrough intact
 
 

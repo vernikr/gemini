@@ -84,15 +84,20 @@ token literally (bug #957 thread shows both forms working).
   `/.well-known/openid-configuration`), and any text/plain 404 on that ladder crashed
   its JSON parser ('Invalid OAuth error response … Not Found').
   ⇒ **Use the `mcp-remote` bridge for Freebuff** (same pattern as its Atlassian/Apify
-  entries): it injects the Authorization header itself:
+  entries): it injects the Authorization header itself. Verified 2026-10-08: Freebuff
+  does NOT pass the entry's `env` block to spawned processes (the `${VAR}` substitution
+  in `--header` resolved to a wrong/empty value → 401 → OAuth dance → DCR 404), so put
+  the token LITERALLY in the args:
   ```jsonc
   "gemini-http": {
     "command": "npx",
     "args": ["-y", "mcp-remote", "http://127.0.0.1:8790/mcp",
-             "--header", "Authorization: Bearer ${GEMINI_MCP_TOKEN}"],
-    "env": { "GEMINI_MCP_TOKEN": "<value from the server's .env>" }
+             "--header", "Authorization: Bearer <TOKEN-FROM-SERVER-.env>"]
   }
   ```
+  (Caveat: the token is then visible in the local process list — acceptable on a
+  personal Mac; rotate via setup if it ever leaks. Clients that DO honour `env`
+  (curl, SDK scripts, well-behaved launchers) may use the `${GEMINI_MCP_TOKEN}` form.)
   Server-side hardening shipped anyway (v0.2.2/v0.2.3): `WWW-Authenticate: Bearer` on
   401, RFC 9728 metadata on `/.well-known/oauth-protected-resource[/mcp]`, and JSON
   (never text/plain) on every other `/.well-known/*` path — no client can crash on
