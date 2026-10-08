@@ -56,6 +56,16 @@ Commits + push to origin + artifact listed below. Chat report after each: PM-sty
   observed via systemd-cgtop, disk added < 200 MB); scenarios G5–G8 live (wait countdown
   visibility in Freebuff recorded per b03 findings).
 
+### M4.5 · File ingest (analyze_file + self-hosted presigned upload) → ships in v0.3.0
+- Per 03 §10 (D10): tools `file_upload_ticket` + `analyze_file`; `/v1/upload/<id>` route
+  (HMAC one-time sig, loopback, size cap); scp alternative into `inbox/`; binary
+  fail-fast sniff (zero spend); retention/caps; tests (sig, expiry, sniff, e2e with
+  FakeRouter); Freebuff prompt recipes (curl via tunnel / scp) in wiring doc.
+- Precondition: the "Not connected" drop on real calls diagnosed+fixed (M4) — file
+  calls run for minutes, session stability is the foundation.
+- **Artifact**: the user's real RTF (Bank of Russia 6681-У) analyzed end-to-end with
+  progress visible in Freebuff (closes b03 together with M4).
+
 ### M5 · Hardening & DX → both repos v1.0.0
 - Overflow tiers live-tested (1 lite call), retention eviction live-tested (fake old
   files), restart-consistency drill, README as-built (RU quickstart + EN reference),

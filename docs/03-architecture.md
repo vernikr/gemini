@@ -266,3 +266,41 @@ Env (`.env`): `GEMINI_API_KEYS` (comma) or `GEMINI_API_KEY_1..10`, `GEMINI_MCP_T
 - D7: thinking default high is a service config, per-request override wins; gemma ignores it (logged).
 - D8: Chunk service marker is a prompt-template file, editable without code (prompts inline in `prompts.py` as constants + optional `prompts/` dir override).
 - D9: Waiting covers minute-scale gates only (RPM/TPM/short cooldowns, capped at `wait.max_s`); waiting hours for a daily reset inside one tool call is impractical — the caller gets ETAs (progress + FR-B8 error) and decides: retry later or opt into overflow.
+
+## 10. File ingest — "hand over a file, agent context stays clean" (D10)
+
+Problem: files live on the client machine; the server cannot read client paths, and
+an agent that reads a file to paste it into `body` pollutes the very context this
+project protects. Decision D10 (2026-10-08, user): server-side helper (NOT a local
+shim), presigned-URL pattern. Classic presigned URLs need object storage; we
+self-host the same primitive on the existing daemon — zero new infrastructure.
+
+Flow:
+
+1. MCP tool `file_upload_ticket(filename, size_bytes)` reserves `upload_id` (uuid4)
+   and returns `{upload_id, upload_url, scp_path, expires_in_s: 900}` where
+   `upload_url = http://127.0.0.1:8790/v1/upload/<id>?exp=<unix>&sig=<hmac>`,
+   `sig = HMAC-SHA256(GEMINI_MCP_TOKEN, "<id>|<exp>|<size>")` (compare_digest),
+   `scp_path = root@<vps>:/opt/apps/gemini-mcp/inbox/<id>`.
+2. Agent uploads the bytes — either channel (Freebuff has a shell):
+   - HTTP `PUT` to `upload_url` through the SSH tunnel (`ssh -N -L 8790:127.0.0.1:8790
+     root@<vps>`): the signature IS the auth (route exempt from bearer), one-time,
+     15-min expiry, size cap;
+   - `scp <file> <scp_path>`: no tunnel needed, the SSH key is the auth.
+   Server writes `inbox/<id>.part` → atomic rename → `chmod 600`.
+3. MCP tool `analyze_file(task, upload_id, …same knobs as analyze_large…)`: server
+   loads the blob, decodes utf-8→latin-1, runs a binary sniff (NUL bytes /
+   non-text ratio) → non-text fails fast with `binary_file_needs_conversion`
+   (ZERO RPD spend), else the existing pipeline chunks/consolidates it.
+   `meta.file = {filename, bytes, chars, encoding}`.
+4. Retention: inbox purged after analysis by default (`keep_hours` config),
+   `max_file_mb` cap (50 default), total-inbox cap; cleanup piggybacks the
+   existing retention prune (§5).
+
+"Server decides how to split": text-like payload → semantic chunker (§4); any file
+is accepted for upload, the split/convert decision happens server-side at step 3.
+RTF caveat: raw RTF survives splitting (uncompressed) BUT Cyrillic is frequently
+stored as `\'XX`/`\uNNNN` escapes → the model would read markup noise; convert
+first (`textutil -convert txt` on macOS) or add a minimal RTF text extractor later
+(conversions deferred per user). Compressed/binary (docx, pdf, zip) → fail-fast
+until conversion lands.
