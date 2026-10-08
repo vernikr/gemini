@@ -25,10 +25,21 @@ commands or env plumbing in the MCP config needed.
 ## B) HTTP daemon via SSH tunnel (for other clients / multiple agents)
 
 The daemon listens on `127.0.0.1:8790` only (never exposed publicly — blocker b06).
-Open a tunnel first, keep it running:
+Open the tunnel via the **launchd agent** — it restarts the tunnel automatically on
+death, after sleep, and at login (manual tunnels kept dying silently and every death
+looked like "MCP server failed"):
 
 ```bash
-ssh -N -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST &
+cp scripts/gemini-tunnel.plist ~/Library/LaunchAgents/com.vernikr.gemini-tunnel.plist
+launchctl load ~/Library/LaunchAgents/com.vernikr.gemini-tunnel.plist
+curl -sf http://127.0.0.1:8790/healthz && echo OK   # log: /tmp/gemini-tunnel.log
+```
+
+Manual fallback (single session, dies on sleep — avoid):
+
+```bash
+ssh -f -N -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
+    -o ExitOnForwardFailure=yes -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST
 ```
 
 Then in `~/.agents/mcp.json`:
@@ -42,20 +53,16 @@ Then in `~/.agents/mcp.json`:
     } } }
 ```
 
-Keep the tunnel alive across idle periods (and fail loudly instead of dying silently):
+**Freebuff**: either the `type: http` block above or the `mcp-remote` bridge from
+"Known client quirks" works — all early failures were a mis-copied token, not header
+dropping. Prefer the bridge until native http is re-verified end-to-end.
+
+`GEMINI_MCP_TOKEN` lives on the server in `/opt/apps/gemini-mcp/.env`. **Never
+hand-copy it** (a stray character caused days of 401s); pull it over SSH:
 
 ```bash
-ssh -f -N -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
-    -o ExitOnForwardFailure=yes -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST &
+ssh root@<vps> 'grep GEMINI_MCP_TOKEN /opt/apps/gemini-mcp/.env | cut -d= -f2 | tr -d "\n"' | pbcopy
 ```
-
-**Freebuff specifically**: its native http client drops configured headers — use the
-`mcp-remote` bridge from "Known client quirks" instead of the block above.
-
-`GEMINI_MCP_TOKEN` must be exported in the environment Freebuff launches from; the
-value lives on the server in `/opt/apps/gemini-mcp/.env` (`sudo grep TOKEN
-/opt/apps/gemini-mcp/.env`). If `$VAR` expansion misbehaves in your build, paste the
-token literally (bug #957 thread shows both forms working).
 
 ## Verify (2 minutes)
 
