@@ -48,6 +48,8 @@ ingest:                    # M4.5 file ingest (§9): tickets, inbox, retention
   keep_hours: 24
   total_cap_mb: 500
   scp_target: root@YOUR_VPS_HOST
+  use_pandoc: true         # M4.6: RTF/DOCX → GitHub-flavored Markdown on the server
+  pandoc_timeout_s: 60
 
 logging:
   dir: logs

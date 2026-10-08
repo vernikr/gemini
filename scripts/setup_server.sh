@@ -19,6 +19,14 @@ command -v uv >/dev/null 2>&1 || {
   exit 1; }
 id "$APP_USER" >/dev/null 2>&1 || { echo "user '$APP_USER' missing (override: APP_USER=...)" >&2; exit 1; }
 
+# pandoc — server-side RTF/DOCX → Markdown extraction (M4.6). One-shot subprocess
+# per file (no daemon, no RAM residency); never touches ports/services (deployment notes).
+if ! command -v pandoc >/dev/null 2>&1; then
+  echo "→ installing pandoc (RTF/DOCX → Markdown)"
+  apt-get update -qq >/dev/null 2>&1 || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq pandoc >/dev/null
+fi
+
 mkdir -p "$APP/logs" "$SHARED" "$ROUTER_SRC"
 chown -R "$APP_USER:$APP_USER" "$APP" "$SHARED" "$ROUTER_SRC"
 chmod 770 "$SHARED"

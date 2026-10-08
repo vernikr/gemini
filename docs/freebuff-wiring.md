@@ -110,11 +110,14 @@ scp paper.rtf root@<vps>:/opt/apps/gemini-mcp/inbox/<upload_id>   # no tunnel ne
 # 3) agent: analyze_file(task="…", upload_id="…")
 ```
 
-Server-side: text-like files go straight into the chunking pipeline; RTF is
-extracted on the server (cp1251 `\'xx` runs, `\uNNNN`, junk groups skipped);
-binaries (pdf/docx/zip) fail fast with `binary_file_needs_conversion` and ZERO
-quota spent (server-side converters are deferred). Inbox retention: `keep_hours`
-(default 24) + `total_cap_mb` (default 500), pruned on each ticket issuance.
+Server-side: pandoc (installed by setup) converts **RTF/DOCX/ODT/EPUB/HTML →
+GitHub-flavored Markdown** — headings, bold/italic, lists and tables survive for
+the model (`meta.file.extractor = pandoc/rtf→gfm`, `encoding = markdown`); if
+pandoc is ever missing, RTF falls back to the built-in plain-text extractor
+(cp1251 `\'xx` runs, `\uNNNN`, junk groups skipped). Binaries (pdf/zip) fail fast
+with `binary_file_needs_conversion` and ZERO quota spent (PDF converter deferred —
+candidate: pymupdf4llm). Inbox retention: `keep_hours` (default 24) +
+`total_cap_mb` (default 500), pruned on each ticket issuance.
 
 **Routes (v0.4.0).** `route:"optimal"` (default) tries models in empirical
 availability order 3.6 → 3.5 → 3-preview → 3.8 → 3.7 (older = less loaded on the

@@ -52,13 +52,16 @@ class RoutingCfg(BaseModel):
 
 
 class IngestCfg(BaseModel):
-    """File ingest (M4.5): inbox dir, caps, ticket TTL, retention (§9)."""
+    """File ingest (M4.5): inbox dir, caps, ticket TTL, retention (§9).
+    M4.6: pandoc converts RTF/DOCX → GitHub-flavored Markdown server-side."""
     dir: str = "inbox"
     max_file_mb: int = 50
     ticket_ttl_s: int = 900
     keep_hours: float = 24
     total_cap_mb: float = 500
     scp_target: str = ""           # e.g. root@<vps>; shown in tickets when set
+    use_pandoc: bool = True        # RTF/DOCX/ODT/EPUB/HTML → gfm Markdown
+    pandoc_timeout_s: int = 60
 
 
 class AppCfg(BaseModel):

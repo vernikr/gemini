@@ -225,7 +225,7 @@ async def analyze_file_tool(deps: Deps, emitter: ProgressEmitter, params: dict) 
                                      hint="ticket reserved but bytes never arrived — "
                                           "run the curl/scp upload from the ticket")
         data = path.read_bytes()
-        reason = ingest.sniff_binary(data)
+        reason = ingest.sniff_binary(data, side.get("filename", ""), cfgi.use_pandoc)
         if reason:
             raise ingest.IngestError(
                 "binary_file_needs_conversion", reason=reason,
@@ -233,7 +233,8 @@ async def analyze_file_tool(deps: Deps, emitter: ProgressEmitter, params: dict) 
                 hint="server-side converters (docx/pdf/zip) are deferred; NOTHING was "
                      "sent to any model (zero quota spent). Upload .txt/.md/.csv/.rtf "
                      "(RTF is extracted server-side) or convert first.")
-        text, enc, extractor = ingest.extract_text(data, side.get("filename", ""))
+        text, enc, extractor = ingest.extract_text(
+            data, side.get("filename", ""), cfgi.use_pandoc, cfgi.pandoc_timeout_s)
     except ingest.IngestError as e:
         deps.audit.record({"ts": time.time(), "tool": "analyze_file",
                            "upload_id": upload_id, "error": e.payload["error"]})

@@ -117,9 +117,17 @@ _MAGIC = ((b"%PDF", "pdf"), (b"PK\x03\x04", "zip-container (docx/xlsx/…)"),
           (b"\x1f\x8b", "gzip"), (b"Rar!", "rar"), (b"\x89PNG", "png"),
           (b"\xff\xd8\xff", "jpeg"))
 
+# documents pandoc turns into Markdown (extension-gated: content sniffing of
+# OOXML internals is out of scope)
+_PANDOC_EXTS = (".docx", ".odt", ".epub", ".html", ".htm")
 
-def sniff_binary(data: bytes) -> str | None:
-    """Reason string if the blob is not text-like, else None."""
+
+def sniff_binary(data: bytes, filename: str = "", pandoc_ok: bool = True) -> str | None:
+    """Reason string if the blob is not analyzable, else None. pandoc-convertible
+    containers (docx/odt/epub/html) pass when pandoc_ok — the server converts them."""
+    low = filename.lower()
+    if pandoc_ok and low.endswith(_PANDOC_EXTS):
+        return None
     for magic, name in _MAGIC:
         if data.startswith(magic):
             return name
@@ -139,6 +147,35 @@ def decode_text(data: bytes) -> tuple[str, str]:
         except UnicodeDecodeError:
             continue
     return data.decode("latin-1", "replace"), "latin-1(replaced)"
+
+
+def pandoc_to_markdown(data: bytes, fmt: str, timeout_s: int = 60) -> str | None:
+    """One-shot subprocess: bytes → GitHub-flavored Markdown (headings, bold/italic,
+    lists and tables survive). None when pandoc is missing or fails — callers fall
+    back to the plain-text extractor. No daemon, no RAM residency (deployment notes)."""
+    import shutil
+    import subprocess
+    import tempfile
+
+    exe = shutil.which("pandoc")
+    if not exe:
+        return None
+    src = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=f".{fmt}", delete=False) as f:
+            f.write(data)
+            src = f.name
+        out = subprocess.run(
+            [exe, "-f", fmt, "-t", "gfm", "--wrap=none", src],
+            capture_output=True, timeout=timeout_s, check=False)
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.decode("utf-8", "replace")
+        return None
+    except (OSError, subprocess.SubprocessError):
+        return None
+    finally:
+        if src:
+            Path(src).unlink(missing_ok=True)
 
 
 # ---------- minimal RTF → text (D11) ----------
@@ -229,9 +266,31 @@ def rtf_to_text(raw: str) -> str:
     return re.sub(r"\n{3,}", "\n\n", text).strip()
 
 
-def extract_text(data: bytes, filename: str) -> tuple[str, str, str]:
-    """(text, encoding, extractor). RTF → rtf_to_text; else decode_text."""
-    if data[:64].lstrip().startswith(b"{\\rtf") or filename.lower().endswith(".rtf"):
+def extract_text(data: bytes, filename: str, use_pandoc: bool = True,
+                 pandoc_timeout_s: int = 60) -> tuple[str, str, str]:
+    """(text, encoding-or-format, extractor). Pandoc-convertible documents
+    (RTF/DOCX/ODT/EPUB/HTML) become GitHub-flavored Markdown when pandoc is
+    available — headings, bold/italic, lists and tables survive for the model.
+    RTF additionally has the built-in plain-text fallback; everything else is
+    decoded as text."""
+    low = filename.lower()
+    is_rtf = data[:64].lstrip().startswith(b"{\\rtf") or low.endswith(".rtf")
+    if use_pandoc:
+        fmt = ""
+        if is_rtf:
+            fmt = "rtf"
+        elif low.endswith(_PANDOC_EXTS):
+            fmt = low.rsplit(".", 1)[-1]
+        if fmt:
+            md = pandoc_to_markdown(data, fmt, pandoc_timeout_s)
+            if md is not None:
+                return md, "markdown", f"pandoc/{fmt}→gfm"
+            if not is_rtf:
+                raise IngestError(
+                    "conversion_unavailable", filename=filename,
+                    hint="pandoc is not installed on the server — this container "
+                         "cannot be converted yet (zero quota spent)")
+    if is_rtf:
         return rtf_to_text(data.decode("latin-1")), "rtf(cp1251-escapes)", "rtf"
     text, enc = decode_text(data)
     return text, enc, "plain"

@@ -29,12 +29,43 @@ RTF_SAMPLE = (b"{\\rtf1\\ansi\\ansicpg1251\\deff0\n"
               b"End}")
 
 
-def _deps(tmp_path, monkeypatch, router=None):
+def _deps(tmp_path, monkeypatch, router=None, **ingest_kw):
     monkeypatch.setenv("GEMINI_MCP_TOKEN", TOKEN)
     cfg = make_app_cfg(tmp_path / "logs").model_copy(
         update={"ingest": IngestCfg(dir=str(tmp_path / "inbox"),
-                                    scp_target="root@vps")})
+                                    scp_target="root@vps",
+                                    use_pandoc=False,      # deterministic E2E
+                                    **ingest_kw)})
     return make_deps(router=router or FakeRouter(), app_cfg=cfg)
+
+
+def test_pandoc_markdown_via_stub(tmp_path, monkeypatch):
+    """Real subprocess against a stub 'pandoc' on PATH: RTF → gfm Markdown."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    stub = bin_dir / "pandoc"
+    stub.write_text("#!/bin/sh\nprintf '# Заголовок\\n\\n**Жирный** текст\\n'\n")
+    stub.chmod(0o755)
+    monkeypatch.setenv("PATH", str(bin_dir))
+    text, fmt, extractor = ingest.extract_text(RTF_SAMPLE, "doc.rtf")
+    assert fmt == "markdown" and extractor == "pandoc/rtf→gfm"
+    assert text.startswith("# Заголовок") and "**Жирный**" in text
+
+
+def test_pandoc_missing_rtf_falls_back_builtin(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))       # empty dir → no pandoc
+    text, enc, extractor = ingest.extract_text(RTF_SAMPLE, "doc.rtf")
+    assert extractor == "rtf" and "Hello Река" in text
+
+
+def test_docx_container_without_pandoc_fails_clean(tmp_path, monkeypatch):
+    monkeypatch.setenv("PATH", str(tmp_path))
+    assert ingest.sniff_binary(b"PK\x03\x04junk", "f.docx") is None  # ext-gated pass
+    with pytest.raises(ingest.IngestError) as e:
+        ingest.extract_text(b"PK\x03\x04junk", "f.docx")
+    assert e.value.payload["error"] == "conversion_unavailable"
+    # pandoc disabled entirely → sniffer rejects the container up front
+    assert ingest.sniff_binary(b"PK\x03\x04junk", "f.docx", pandoc_ok=False) is not None
 
 
 def test_ticket_sign_verify_tamper_expiry():
