@@ -206,10 +206,11 @@ class AuthMetadataRoutes:
     STATIC bearer auth with no authorization server.
 
     Live finding (2026-10-08, Freebuff): after an unauthenticated probe gets 401, the
-    client GETs /.well-known/oauth-protected-resource; Starlette's default 404
-    (text/plain 'Not Found') crashed the client's JSON parser ('Unexpected identifier
-    Not'). We serve proper metadata instead — and JSON (never text) on every
-    /.well-known/oauth-* path."""
+    client walks the discovery ladder — /.well-known/oauth-protected-resource, then
+    oauth-authorization-server, then OIDC /.well-known/openid-configuration; Starlette's
+    default 404 (text/plain 'Not Found') crashed the client's JSON parser ('Unexpected
+    identifier Not'). We serve RFC 9728 metadata on protected-resource paths and JSON
+    (never text) on EVERY other /.well-known/* path."""
 
     def __init__(self, app, mcp_path: str = "/mcp"):
         self.app = app
@@ -217,7 +218,7 @@ class AuthMetadataRoutes:
 
     async def __call__(self, scope, receive, send):
         path = scope.get("path", "") if scope["type"] == "http" else ""
-        if path.startswith("/.well-known/oauth-"):
+        if path.startswith("/.well-known/"):
             headers = dict(scope.get("headers") or ())
             host = headers.get(b"host", b"localhost").decode("latin-1")
             if path.rstrip("/") in ("/.well-known/oauth-protected-resource",

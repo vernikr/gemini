@@ -164,6 +164,8 @@ async def test_auth_metadata_routes():
         assert r2.status_code == 200 and r2.json()["resource"].endswith("/mcp")
         r3 = await c.get("/.well-known/oauth-authorization-server")
         assert r3.status_code == 404 and r3.json()["error"] == "not_supported"
+        r4 = await c.get("/.well-known/openid-configuration")   # OIDC rung of the ladder
+        assert r4.status_code == 404 and r4.headers["content-type"].startswith("application/json")
         assert (await c.get("/healthz")).status_code == 200    # passthrough intact
 
 

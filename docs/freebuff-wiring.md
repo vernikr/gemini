@@ -42,6 +42,16 @@ Then in `~/.agents/mcp.json`:
     } } }
 ```
 
+Keep the tunnel alive across idle periods (and fail loudly instead of dying silently):
+
+```bash
+ssh -f -N -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
+    -o ExitOnForwardFailure=yes -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST &
+```
+
+**Freebuff specifically**: its native http client drops configured headers — use the
+`mcp-remote` bridge from "Known client quirks" instead of the block above.
+
 `GEMINI_MCP_TOKEN` must be exported in the environment Freebuff launches from; the
 value lives on the server in `/opt/apps/gemini-mcp/.env` (`sudo grep TOKEN
 /opt/apps/gemini-mcp/.env`). If `$VAR` expansion misbehaves in your build, paste the
@@ -68,13 +78,23 @@ token literally (bug #957 thread shows both forms working).
 
 ## Known client quirks (as-built)
 
-- **"Invalid OAuth error response … Raw body: Not Found"** when enabling `gemini-http`
-  (Freebuff, pre-v0.2.2): the client probes `/mcp` unauthenticated, gets 401, then runs
-  OAuth discovery on `/.well-known/oauth-protected-resource`; the default text/plain 404
-  crashed its JSON parser. v0.2.2 serves RFC 9728 metadata there (static bearer, no
-  authorization server) and adds `WWW-Authenticate: Bearer` to 401s. Fix: `git pull` +
-  `run_remote.sh setup`, then FULLY restart Freebuff.
-- Fallback bridge (if a client still can't do header auth): run it through `mcp-remote`,
-  the same pattern Freebuff already uses for Atlassian/Apify:
-  `{"command":"npx","args":["-y","mcp-remote","http://127.0.0.1:8790/mcp","--header",
-  "Authorization: Bearer <TOKEN>"]}`.
+- **Freebuff's native `type: http` client drops configured `headers`** (verified
+  2026-10-08): every request arrives unauthenticated → 401 → the client walks the OAuth
+  discovery ladder (protected-resource → authorization-server → OIDC
+  `/.well-known/openid-configuration`), and any text/plain 404 on that ladder crashed
+  its JSON parser ('Invalid OAuth error response … Not Found').
+  ⇒ **Use the `mcp-remote` bridge for Freebuff** (same pattern as its Atlassian/Apify
+  entries): it injects the Authorization header itself:
+  ```jsonc
+  "gemini-http": {
+    "command": "npx",
+    "args": ["-y", "mcp-remote", "http://127.0.0.1:8790/mcp",
+             "--header", "Authorization: Bearer ${GEMINI_MCP_TOKEN}"],
+    "env": { "GEMINI_MCP_TOKEN": "<value from the server's .env>" }
+  }
+  ```
+  Server-side hardening shipped anyway (v0.2.2/v0.2.3): `WWW-Authenticate: Bearer` on
+  401, RFC 9728 metadata on `/.well-known/oauth-protected-resource[/mcp]`, and JSON
+  (never text/plain) on every other `/.well-known/*` path — no client can crash on
+  discovery anymore. Native `type: http` remains the right choice for well-behaved
+  clients (curl/SDK scripts).
