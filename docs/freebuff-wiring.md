@@ -65,3 +65,16 @@ token literally (bug #957 thread shows both forms working).
 | `gemini_generate` | direct single call (model pinning, thinking_level, json out) |
 | `quota_status` | "which model can take a request right now?" |
 | `router_logs` | recent calls/failures from the server ledger |
+
+## Known client quirks (as-built)
+
+- **"Invalid OAuth error response … Raw body: Not Found"** when enabling `gemini-http`
+  (Freebuff, pre-v0.2.2): the client probes `/mcp` unauthenticated, gets 401, then runs
+  OAuth discovery on `/.well-known/oauth-protected-resource`; the default text/plain 404
+  crashed its JSON parser. v0.2.2 serves RFC 9728 metadata there (static bearer, no
+  authorization server) and adds `WWW-Authenticate: Bearer` to 401s. Fix: `git pull` +
+  `run_remote.sh setup`, then FULLY restart Freebuff.
+- Fallback bridge (if a client still can't do header auth): run it through `mcp-remote`,
+  the same pattern Freebuff already uses for Atlassian/Apify:
+  `{"command":"npx","args":["-y","mcp-remote","http://127.0.0.1:8790/mcp","--header",
+  "Authorization: Bearer <TOKEN>"]}`.

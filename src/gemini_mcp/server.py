@@ -191,8 +191,48 @@ class BearerMiddleware:
         auth = headers.get(b"authorization", b"").decode("latin-1")
         ok = auth.startswith("Bearer ") and hmac.compare_digest(auth[7:], self.token)
         if not ok:
-            response = JSONResponse({"error": "unauthorized"}, status_code=401)
+            response = JSONResponse(
+                {"error": "unauthorized",
+                 "error_description": "static bearer auth: send 'Authorization: Bearer "
+                                      "<GEMINI_MCP_TOKEN>' (no OAuth on this server)"},
+                status_code=401, headers={"WWW-Authenticate": 'Bearer realm="gemini-mcp"'})
             await response(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
+class AuthMetadataRoutes:
+    """OAuth-discovery endpoints (RFC 9728/8414) telling MCP clients that this is
+    STATIC bearer auth with no authorization server.
+
+    Live finding (2026-10-08, Freebuff): after an unauthenticated probe gets 401, the
+    client GETs /.well-known/oauth-protected-resource; Starlette's default 404
+    (text/plain 'Not Found') crashed the client's JSON parser ('Unexpected identifier
+    Not'). We serve proper metadata instead — and JSON (never text) on every
+    /.well-known/oauth-* path."""
+
+    def __init__(self, app, mcp_path: str = "/mcp"):
+        self.app = app
+        self.mcp_path = mcp_path
+
+    async def __call__(self, scope, receive, send):
+        path = scope.get("path", "") if scope["type"] == "http" else ""
+        if path.startswith("/.well-known/oauth-"):
+            headers = dict(scope.get("headers") or ())
+            host = headers.get(b"host", b"localhost").decode("latin-1")
+            if path.rstrip("/") in ("/.well-known/oauth-protected-resource",
+                                    f"/.well-known/oauth-protected-resource{self.mcp_path}"):
+                resp = JSONResponse({
+                    "resource": f"http://{host}{self.mcp_path}",
+                    "bearer_methods_supported": ["header"],
+                    "resource_documentation": "https://github.com/vernikr/gemini-mcp",
+                    "tls_client_certificate_bound_access_tokens": False})
+            else:   # oauth-authorization-server & co: JSON 404, never text/plain
+                resp = JSONResponse(
+                    {"error": "not_supported",
+                     "error_description": "static bearer token auth; no authorization server"},
+                    status_code=404)
+            await resp(scope, receive, send)
             return
         await self.app(scope, receive, send)
 
@@ -205,4 +245,4 @@ def build_http_app(srv: MCPServer, cfg: AppCfg, token: str | None):
     )
     if token:
         app = BearerMiddleware(app, token, protected=(cfg.server.mcp_path, "/v1"))
-    return app
+    return AuthMetadataRoutes(app, cfg.server.mcp_path)

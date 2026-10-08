@@ -14,7 +14,7 @@ from starlette.routing import Route
 
 from conftest import FakeCtx, FakeRouter, make_app_cfg, make_deps, real_router_cfg
 from gemini_mcp.progress import ProgressEmitter
-from gemini_mcp.server import BearerMiddleware, build_http_app, build_server
+from gemini_mcp.server import AuthMetadataRoutes, BearerMiddleware, build_http_app, build_server
 from gemini_mcp.tools import (
     analyze_large_tool,
     gemini_generate_tool,
@@ -130,6 +130,41 @@ async def test_bearer_middleware():
                             headers={"Authorization": "Bearer sekret"})).status_code == 200
         assert (await c.get("/v1/quota",
                             headers={"Authorization": "Bearer sekret"})).status_code == 200
+
+
+async def test_401_advertises_static_bearer():
+    """Freebuff follow-up (v0.2.2): 401 must carry WWW-Authenticate and a JSON body —
+    clients that probe unauthenticated decide between OAuth and static token by it."""
+    async def ok(request):
+        return JSONResponse({"ok": True})
+
+    app = Starlette(routes=[Route("/mcp", ok, methods=["GET", "POST"])])
+    async with await _client(BearerMiddleware(app, "sekret")) as c:
+        r = await c.get("/mcp")
+        assert r.status_code == 401
+        assert r.headers["www-authenticate"].startswith("Bearer")
+        assert r.json()["error"] == "unauthorized"             # parseable JSON, not text
+
+
+async def test_auth_metadata_routes():
+    """RFC 9728 discovery: protected-resource metadata → static bearer, no AS;
+    every other /.well-known/oauth-* → JSON 404 (text/plain crashed Freebuff's parser)."""
+    async def ok(request):
+        return JSONResponse({"ok": True})
+
+    inner = Starlette(routes=[Route("/healthz", ok)])
+    app = AuthMetadataRoutes(inner, "/mcp")
+    async with await _client(app) as c:
+        r = await c.get("/.well-known/oauth-protected-resource")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["resource"].endswith("/mcp")
+        assert body["bearer_methods_supported"] == ["header"]
+        r2 = await c.get("/.well-known/oauth-protected-resource/mcp")
+        assert r2.status_code == 200 and r2.json()["resource"].endswith("/mcp")
+        r3 = await c.get("/.well-known/oauth-authorization-server")
+        assert r3.status_code == 404 and r3.json()["error"] == "not_supported"
+        assert (await c.get("/healthz")).status_code == 200    # passthrough intact
 
 
 async def test_http_app_custom_routes(tmp_path):
