@@ -29,6 +29,20 @@ class Deps:
     audit: AuditLogger
     logger: logging.Logger
     jobs: JobManager = field(default_factory=JobManager)
+    router_optimal: Router | None = None    # availability-ordered chain (route=optimal)
+
+
+def _apply_route(deps: Deps, route: str | None, overflow: str | None) -> tuple[Router, str, str]:
+    """Resolve (router, overflow, route). 'optimal' (default): empirical-availability
+    chain, overflow auto-upgraded to 'lite+gemma'. 'best_available': newest-first
+    config chain, overflow strictly opt-in (legacy hard-stop)."""
+    r = route or deps.app_cfg.routing.default_route
+    if r == "optimal":
+        router = deps.router_optimal or deps.router
+        ovf = overflow if overflow not in (None, "off") else "lite+gemma"
+    else:
+        router, ovf = deps.router, overflow or "off"
+    return router, ovf, r
 
 
 async def _jobbed(deps: Deps, tool: str, emitter: ProgressEmitter, params: dict,
@@ -77,13 +91,17 @@ def _fail(deps: Deps, emitter: ProgressEmitter, tool: str, request_id: str | Non
 
 async def analyze_large_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
     p = AnalyzeParams(**params)
-    pipeline = Pipeline(deps.router, deps.app_cfg, emitter, deps.logger)
+    router, p.overflow, p.route = _apply_route(deps, p.route, p.overflow)
+    pipeline = Pipeline(router, deps.app_cfg, emitter, deps.logger)
     try:
         text, meta = await pipeline.analyze(p)
     except (QuotaExhaustedError, PlanBudgetError) as e:
         raise _fail(deps, emitter, "analyze_large", p.request_id, e) from e
+    meta = {**meta, "route": p.route, "overflow": p.overflow,
+            "model_final": (meta.get("models_used") or [None])[-1]}
     deps.audit.record({
         "ts": time.time(), "tool": "analyze_large", "request_id": p.request_id,
+        "route": p.route, "overflow": p.overflow,
         "task_chars": len(p.task), "body_chars": len(p.body or ""),
         "thinking_level": meta["thinking_level"], "models_used": meta["models_used"],
         "chunks": meta["chunks"].get("count", 0), "failed_chunks": meta["chunks"].get("failed", []),
@@ -96,16 +114,18 @@ async def analyze_large_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
 
 
 async def gemini_generate_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
-    await emitter.stage("received", 3, f"single-shot: {len(params['prompt'])} chars")
+    router, ovf, route = _apply_route(deps, params.get("route"), params.get("overflow"))
+    await emitter.stage("received", 3,
+                        f"single-shot: {len(params['prompt'])} chars, route={route}")
     req = RouterRequest(
         prompt=params["prompt"], system=params.get("system"),
         thinking_level=params.get("thinking_level") or deps.app_cfg.thinking.default,
         output_format=params.get("output_format", "text"),
         max_output_tokens=params.get("max_output_tokens"), model=params.get("model"),
-        overflow=params.get("overflow", "off"), wait=params.get("wait_for_minute_limits"),
+        overflow=ovf, wait=params.get("wait_for_minute_limits"),
         request_id=params.get("request_id"), source="mcp", kind="single")
     try:
-        res = await deps.router.complete(req, on_event=emitter.router_event_sync)
+        res = await router.complete(req, on_event=emitter.router_event_sync)
     except QuotaExhaustedError as e:
         raise _fail(deps, emitter, "gemini_generate", req.request_id, e) from e
     await emitter.stage("done", 100, f"done on {res.model} in {res.latency_s:.1f}s")
@@ -114,9 +134,11 @@ async def gemini_generate_tool(deps: Deps, emitter: ProgressEmitter, params: dic
             "tokens_in": res.tokens_in, "tokens_out": res.tokens_out,
             "latency_s": res.latency_s, "cached": res.cached,
             "overflow_tier": res.overflow_tier, "quota_after": res.quota_after,
+            "route": route, "overflow": ovf,
             "progress_trace": emitter.trace}
     deps.audit.record({"ts": time.time(), "tool": "gemini_generate",
                        "request_id": res.request_id, "model": res.model,
+                       "route": route, "overflow": ovf,
                        "prompt_chars": len(req.prompt), "cached": res.cached,
                        "tokens_in": res.tokens_in, "tokens_out": res.tokens_out,
                        "elapsed_s": res.latency_s})
@@ -124,7 +146,8 @@ async def gemini_generate_tool(deps: Deps, emitter: ProgressEmitter, params: dic
 
 
 async def quota_status_tool(deps: Deps) -> dict:
-    rows = deps.router.quota_table()
+    router = _apply_route(deps, None, None)[0]     # default-route view
+    rows = router.quota_table()
     rec = next((r for r in rows if r.get("recommended")), None)
     return {
         "rows": rows,

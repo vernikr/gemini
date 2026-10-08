@@ -80,7 +80,7 @@ async def test_server_registers_tools_with_expected_schema(tmp_path):
     al = next(t for t in tools if t.name == "analyze_large")
     schema = getattr(al, "inputSchema", None) or al.input_schema
     props = schema["properties"]
-    for field in ("task", "body", "thinking_level", "overflow",
+    for field in ("task", "body", "thinking_level", "overflow", "route",
                   "wait_for_minute_limits", "chunk_tokens", "overlap_ratio",
                   "request_id", "wait_seconds"):
         assert field in props

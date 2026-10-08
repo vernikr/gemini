@@ -44,6 +44,7 @@ class AnalyzeParams:
     request_id: str | None = None
     result_max_chars: int | None = None
     source: str = "mcp"
+    route: str = "optimal"                  # router already selected upstream (tools)
 
 
 class Pipeline:

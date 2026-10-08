@@ -134,7 +134,7 @@ async def test_thinking_default_and_override():
     router = FakeRouter()
     cfg = make_app_cfg()
     await _run(router, cfg, AnalyzeParams(task="t", body="tiny"))
-    assert router.calls[0].thinking_level == "high"              # app default
+    assert router.calls[0].thinking_level == "medium"            # app default (v0.4.0)
     await _run(router, cfg, AnalyzeParams(task="t", body="tiny2", thinking_level="low"))
     assert router.calls[1].thinking_level == "low"               # per-request override
 

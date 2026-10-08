@@ -26,26 +26,35 @@ from .tools import (
 )
 
 INSTRUCTIONS = """\
-Gemini gateway for the Google AI Studio FREE tier (Flash chain 3.8→3.7→3.6→3.5→3,
-each ~20 requests/day). Use analyze_large for massive bodies: it measures tokens,
-splits into overlapping chunks (each marked 'CHUNK N/M'), analyzes them, consolidates,
-and returns ONLY the compact result plus meta (models, spends, quota_after,
-progress_trace) — your context stays clean. thinking_level defaults to 'high';
-wait_for_minute_limits defaults to true (the server waits out RPM/TPM windows and
-reports a countdown via progress). Speed knob: thinking_level='high' (default) makes
-the model think long — right for hard analysis; for simple tasks (summaries,
-rewrites, extraction) pass thinking_level='low' and get answers in seconds, not
-minutes. Daily-quota exhaustion is a HARD STOP: you receive
-a structured quota_exhausted / plan_budget_insufficient error with per-model budgets,
-wait times and reset ETA — then retry later, shrink the job, or opt in with
-overflow='lite' or 'lite+gemma' (weaker models with large quotas). Call quota_status
-BEFORE big jobs; router_logs shows recent spend.
+Gemini gateway for the Google AI Studio FREE tier (Flash models, ~20 requests/day
+each). Two routing profiles ('route' argument of the compute tools):
+- 'optimal' (default): models are tried in empirical availability order
+  3.6 → 3.5 → 3-preview → 3.8 → 3.7 (older = less loaded on the free tier);
+  overflow to flash-lite/gemma is AUTOMATIC when Flash budgets run out.
+- 'best_available': newest-first 3.8 → 3.7 → 3.6 → 3.5 → 3-preview; overflow is
+  strictly opt-in ('off' = HARD STOP on quota exhaustion).
+Use analyze_large for massive bodies: it measures tokens, splits into overlapping
+chunks (each marked 'CHUNK N/M'), analyzes them, consolidates, and returns ONLY the
+compact result plus meta (models, spends, quota_after, progress_trace) — your context
+stays clean. thinking_level defaults to 'medium'; wait_for_minute_limits defaults to
+true (the server waits out RPM/TPM windows and reports a countdown via progress).
+On a hard stop you receive a structured quota_exhausted / plan_budget_insufficient
+error with per-model budgets, wait times and reset ETA — then retry later, shrink the
+job, or opt in with overflow='lite'/'lite+gemma'. Call quota_status BEFORE big jobs;
+router_logs shows recent spend.
 
 TIMEOUT-SAFE LONG JOBS: analyze_large/gemini_generate hold the call inline for at most
 wait_seconds (default 25). If the job needs longer, the call returns
 {status:'running', request_id, poll} — the server KEEPS COMPUTING. Then call
 analyze_result(request_id) (each call waits up to its own wait_seconds) until you get
-the final {result, meta}. Never resubmit a running job: quota is already committed."""
+the final {result, meta}. Never resubmit a running job: quota is already committed.
+
+REPORTING (required): after every analyze_large/gemini_generate call, tell the user
+in chat in one short line: which model produced the answer (meta.model_final /
+meta.model) and any rough edges from meta.progress_trace — provider 503s and retries,
+model fallbacks, minute-limit waits (with seconds waited), failed chunks. If the call
+errored, say so plainly with the reset ETA. Never silently swallow retries, waits or
+fallbacks."""
 
 
 def build_server(deps: Deps) -> MCPServer:
@@ -60,6 +69,7 @@ def build_server(deps: Deps) -> MCPServer:
         max_output_tokens: int | None = None,
         model: str | None = None,
         overflow: Literal["off", "lite", "lite+gemma"] = "off",
+        route: Literal["optimal", "best_available"] | None = None,
         wait_for_minute_limits: bool | None = None,
         chunk_tokens: int | None = None,
         overlap_ratio: float | None = None,
@@ -80,12 +90,17 @@ def build_server(deps: Deps) -> MCPServer:
         Args:
             task: what to do with the body (analysis instructions for the model).
             body: the massive text to analyze.
-            thinking_level: 'low'|'medium'|'high' (default: high).
+            thinking_level: 'low'|'medium'|'high' (default: medium).
             output_format: 'text' or 'json' for the final consolidated result.
             max_output_tokens: cap per model call (chunks and consolidation).
             model: pin one model (skips the fallback chain).
-            overflow: opt-in weaker models when Flash quotas are exhausted:
-                'off' (default, hard stop) | 'lite' | 'lite+gemma'.
+            overflow: weaker models when Flash quotas are exhausted:
+                'off' | 'lite' | 'lite+gemma'. On route 'optimal' it is
+                auto-upgraded to 'lite+gemma' unless you set it explicitly.
+            route: 'optimal' (default) — availability-ordered chain
+                3.6→3.5→3-preview→3.8→3.7 with automatic overflow; or
+                'best_available' — newest-first chain, overflow opt-in only
+                (hard stop on quota).
             wait_for_minute_limits: wait out RPM/TPM windows with a progress countdown
                 (default true); false → route to the next model instantly or return
                 wait ETAs in the error.
@@ -109,7 +124,8 @@ def build_server(deps: Deps) -> MCPServer:
         return await _jobbed(deps, "analyze_large", emitter, {
             "task": task, "body": body, "thinking_level": thinking_level,
             "output_format": output_format, "max_output_tokens": max_output_tokens,
-            "model": model, "overflow": overflow, "wait": wait_for_minute_limits,
+            "model": model, "overflow": overflow, "route": route,
+            "wait": wait_for_minute_limits,
             "chunk_tokens": chunk_tokens, "overlap_ratio": overlap_ratio,
             "request_id": request_id, "result_max_chars": result_max_chars},
             wait_seconds,
@@ -124,6 +140,7 @@ def build_server(deps: Deps) -> MCPServer:
         max_output_tokens: int | None = None,
         model: str | None = None,
         overflow: Literal["off", "lite", "lite+gemma"] = "off",
+        route: Literal["optimal", "best_available"] | None = None,
         wait_for_minute_limits: bool | None = None,
         request_id: str | None = None,
         wait_seconds: int | None = 25,
@@ -131,17 +148,18 @@ def build_server(deps: Deps) -> MCPServer:
     ) -> dict:
         """Single-shot quota-aware Gemini completion (payload fits the limits).
 
-        Same routing, thinking_level (default high), wait policy, overflow semantics
-        and async ticket flow (wait_seconds, default 25 → {status:'running',
-        request_id} + analyze_result) as analyze_large, without chunking. Returns
-        {result, meta{model, key_id, tokens_in/out, latency_s, cached, quota_after,
+        Same routing profiles ('route': 'optimal' default / 'best_available'),
+        thinking_level (default medium), wait policy, overflow semantics and async
+        ticket flow (wait_seconds, default 25 → {status:'running', request_id} +
+        analyze_result) as analyze_large, without chunking. Returns {result,
+        meta{model, key_id, tokens_in/out, latency_s, cached, route, quota_after,
         progress_trace}}.
         """
         emitter = ProgressEmitter(ctx, deps.logger)
         return await _jobbed(deps, "gemini_generate", emitter, {
             "prompt": prompt, "system": system, "thinking_level": thinking_level,
             "output_format": output_format, "max_output_tokens": max_output_tokens,
-            "model": model, "overflow": overflow,
+            "model": model, "overflow": overflow, "route": route,
             "wait_for_minute_limits": wait_for_minute_limits,
             "request_id": request_id},
             wait_seconds,

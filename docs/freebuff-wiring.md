@@ -95,6 +95,15 @@ so the retry is nearly free. Audit gains `event:"async_submitted"` rows; job lif
 | `quota_status` | "which model can take a request right now?" |
 | `router_logs` | recent calls/failures from the server ledger |
 
+**Routes (v0.4.0).** `route:"optimal"` (default) tries models in empirical
+availability order 3.6 → 3.5 → 3-preview → 3.8 → 3.7 (older = less loaded on the
+free tier) and auto-overflows to flash-lite/gemma when Flash budgets run out.
+`route:"best_available"` is the legacy newest-first chain with opt-in overflow
+(hard stop). `thinking_level` default is `medium` (per-request override wins).
+Server instructions REQUIRE the agent to report in chat after every compute call:
+the final model (`meta.model_final`/`meta.model`) and rough edges from
+`meta.progress_trace` — 503s/retries, fallbacks, minute-limit waits, failed chunks.
+
 ## Known client quirks (as-built)
 
 - **All early HTTP-path failures (401 → OAuth dance → discovery crashes) traced to ONE

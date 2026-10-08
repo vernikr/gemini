@@ -2,6 +2,7 @@
 # Secrets live in .env only: GEMINI_API_KEYS, GEMINI_MCP_TOKEN, GEMINI_ROUTER_STATE.
 
 router:
+  # 'best_available' route chain (newest-first, overflow opt-in only)
   chain: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash,
           gemini-3-flash-preview]
   overflow_tiers: [gemini-3.5-flash-lite, gemma-auto]   # only when a request opts in
@@ -26,7 +27,14 @@ pipeline:
   max_result_chars: 12000
 
 thinking:
-  default: high            # per-request override always wins
+  default: medium          # per-request override always wins
+
+routing:
+  default_route: optimal
+  # 'optimal' route: empirical availability order (older = less loaded on the free
+  # tier), overflow to flash-lite/gemma is AUTOMATIC on this route.
+  optimal_chain: [gemini-3.6-flash, gemini-3.5-flash, gemini-3-flash-preview,
+                  gemini-3.8-flash, gemini-3.7-flash]
 
 server:
   http_bind: 127.0.0.1     # b06: loopback only; remote via SSH tunnel / cloudflared

@@ -38,7 +38,17 @@ class ServerCfg(BaseModel):
 
 
 class ThinkingCfg(BaseModel):
-    default: str = "high"                   # overridable per request (FR-D, user decision)
+    default: str = "medium"                 # overridable per request (FR-D, user decision)
+
+
+class RoutingCfg(BaseModel):
+    """Two fallback routes: 'optimal' (default) walks models in empirical
+    availability order and auto-overflows to flash-lite/gemma; 'best_available'
+    keeps the newest-first config chain with opt-in overflow (legacy semantics)."""
+    default_route: str = "optimal"
+    optimal_chain: list[str] = Field(default_factory=lambda: [
+        "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview",
+        "gemini-3.8-flash", "gemini-3.7-flash"])
 
 
 class AppCfg(BaseModel):
@@ -46,6 +56,7 @@ class AppCfg(BaseModel):
     logging: LoggingCfg = Field(default_factory=LoggingCfg)
     server: ServerCfg = Field(default_factory=ServerCfg)
     thinking: ThinkingCfg = Field(default_factory=ThinkingCfg)
+    routing: RoutingCfg = Field(default_factory=RoutingCfg)
 
 
 def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConfig]:
@@ -56,7 +67,8 @@ def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConf
     if p and Path(p).exists():
         raw = yaml.safe_load(Path(p).read_text(encoding="utf-8")) or {}
     app = AppCfg.model_validate({k: raw[k] for k in
-                                 ("pipeline", "logging", "server", "thinking") if k in raw})
+                                 ("pipeline", "logging", "server", "thinking",
+                                  "routing") if k in raw})
     router_cfg = RouterConfig.load(os.environ.get("GEMINI_ROUTER_CONFIG"),
                                    **raw.get("router", {}))
     return app, router_cfg

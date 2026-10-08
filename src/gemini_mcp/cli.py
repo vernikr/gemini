@@ -26,9 +26,14 @@ def _deps(app_cfg: AppCfg, router_cfg) -> Deps:
     logger = setup_logging(app_cfg.logging,
                            secrets=[os.environ.get("GEMINI_MCP_TOKEN", "")])
     router = Router(router_cfg)
+    router_optimal = None
+    chain = list(app_cfg.routing.optimal_chain or [])
+    if chain and chain != list(router_cfg.chain):
+        router_optimal = Router(router_cfg.model_copy(update={"chain": chain}))
     audit = AuditLogger(app_cfg.logging,
                         secrets=[os.environ.get("GEMINI_MCP_TOKEN", "")])
-    return Deps(router=router, app_cfg=app_cfg, audit=audit, logger=logger)
+    return Deps(router=router, app_cfg=app_cfg, audit=audit, logger=logger,
+                router_optimal=router_optimal)
 
 
 def _run_stdio(app_cfg: AppCfg, router_cfg) -> int:
