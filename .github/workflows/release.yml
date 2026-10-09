@@ -1,0 +1,76 @@
+name: release
+# Dual-publish on tag v*: test (public-registry deps) → PyPI (trusted publishing,
+# OIDC — no API token in secrets) → npm shim (provenance) → consumer smoke against
+# the live registries. One-time store setup: docs/09-ci.md. Manual fallback (until
+# stores are configured): docs/05-packaging.md "Publishing".
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Install from PUBLIC registries only (exactly what consumers get)
+        run: |
+          uv venv .venv-ci
+          UV_NO_SOURCES=1 uv pip install --python .venv-ci/bin/python -e ".[dev]"
+      - run: .venv-ci/bin/ruff check .
+      - run: .venv-ci/bin/pytest -q
+  pypi:
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi                     # matches the PyPI trusted-publisher config
+    permissions:
+      id-token: write                     # OIDC handshake with PyPI
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Lockstep guard — pyproject version must equal the tag
+        run: grep -q "^version = \"${GITHUB_REF_NAME#v}\"$" pyproject.toml
+      - run: rm -rf dist && uv build      # dist hygiene: never ship stale artifacts
+      - uses: pypa/gh-action-pypi-publish@release/v1
+  npm:
+    needs: pypi                           # shim pins ==<version>: PyPI artifact first
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - name: Lockstep guard — package.json version must equal the tag
+        working-directory: packaging/npm
+        run: test "$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME#v}"
+      - name: Publish shim
+        working-directory: packaging/npm
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+  smoke:
+    needs: npm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Consumer E2E from the public registries (retry while propagating)
+        run: |
+          V="${GITHUB_REF_NAME#v}"; ok=0
+          for _ in 1 2 3 4 5 6 7 8; do
+            if uvx --refresh --from "gemini-mcp-gateway==$V" gemini-mcp --version; then ok=1; break; fi
+            sleep 30
+          done
+          test "$ok" = 1 || { echo "PyPI smoke failed for $V"; exit 1; }
+          ok=0
+          for _ in 1 2 3 4 5 6 7 8; do
+            if npx -y "@vernikr/gemini-mcp@$V" --version; then ok=1; break; fi
+            sleep 30
+          done
+          test "$ok" = 1 || { echo "npm smoke failed for $V"; exit 1; }
