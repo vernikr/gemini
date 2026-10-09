@@ -23,32 +23,41 @@ a compact consolidated result — the agent's own context stays clean.
 ## Quickstart — no server (direct mode)
 
 ```bash
-export GEMINI_API_KEYS="AIza...your AI Studio keys, comma-separated"
-uvx --from gemini-mcp-gateway gemini-mcp stdio      # MCP over stdio (any MCP client)
-uvx --from gemini-mcp-gateway gemini-mcp doctor     # keys/chain/limits + live probe
+uvx --from gemini-mcp-gateway gemini-mcp setup
+# wizard: fleet-vs-simple question → masked key paste (aistudio.google.com/app/apikey)
+# → ~/.config/gemini-mcp/{config.yaml,.env 0600} → live listModels probe → client snippet
 ```
+
+Paste the printed snippet into your MCP client (Freebuff `~/.agents/mcp.json`, Claude
+Desktop, Cursor — any stdio client) and ask the agent to call `quota_status`. No env
+vars needed: the gateway auto-discovers `~/.config/gemini-mcp/`. Manual alternative:
+`export GEMINI_API_KEYS="AIza…,AIza…"` + `uvx --from gemini-mcp-gateway gemini-mcp
+stdio`. `gemini-mcp doctor` re-checks keys/chain/limits; `gemini-mcp uninstall --yes`
+removes everything the wizard wrote.
 
 Direct mode needs nothing but API keys: quota counters are per-process approximations
 (reset on restart) and every response says `backend=direct` in its `report` line. Fleet
 deploys (VPS daemon + shared ledger) pin `backend: router` in config.yaml. The npm shim
-`@vernikr/gemini-mcp` (pnpm-first install) arrives with 0.8.0.
+`@vernikr/gemini-mcp` (pnpm-first install) ships the same core at the same version.
 
 ## Status
 
-**Stages 1–4 done; M0–M3 shipped → v0.2.0.** Router core lives in `gemini-router`
-(v0.1.0, pinned git dep). This repo: MCP server (stdio + HTTP daemon), 4 tools,
-chunking pipeline with recursive consolidation, 3-level progress funnel, rotating
-logs + JSONL audit, terminal CLI. 34 tests green, no network needed.
-Next: **M4 deployment to the VPS** (needs the owner's machine — see plan).
+**v0.8.0 — published consumer package.** Fleet side (VPS daemon 0.6.x, SSH-stdio +
+HTTP tunnel) runs in production; consumer side ships as PyPI `gemini-mcp-gateway`
+(+ npm shim `@vernikr/gemini-mcp`) with the dual-mode backend (`router`/`direct`,
+docs/08) and the `setup` wizard (M7.2). Router core: `gemini-router` 0.1.1 on PyPI.
+80 tests green, no network needed (respx/fakes only).
+Next: M7.3 dual-publish CI, M7.4 clean-machine beta.
 
 ## Development
 
 ```bash
-uv sync --extra dev    # gemini-router is a private git dep → GitHub auth required
-                       # (GH_PAT_READ secret in CI; locally: git insteadOf with a PAT)
-uv run pytest -q       # 34 tests: chunker, pipeline, tools/server, logging — all faked
+uv sync --extra dev    # dev pin: gemini-router from git tag (tool.uv.sources);
+                       # published metadata uses the PyPI version range — no auth needed
+uv run pytest -q       # 80 tests: chunker, pipeline, tools/server, logging, direct
+                       # backend (respx), setup wizard — all faked, no network
 uv run ruff check src tests
-GEMINI_API_KEYS=... uv run gemini-mcp quota|calls|logs|prune|doctor
+GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor
 ```
 
 | Stage | Artifact |

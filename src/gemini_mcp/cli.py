@@ -217,10 +217,34 @@ def _bootstrap_env() -> None:
     except ImportError:                      # declared in deps; degrade gracefully
         return
     env_file = os.environ.get("GEMINI_MCP_ENV_FILE")
-    for cand in ([Path(env_file)] if env_file else []) + [Path.cwd() / ".env"]:
+    from .config import config_home
+    cands = ([Path(env_file)] if env_file else []) \
+        + [config_home() / ".env", Path.cwd() / ".env"]
+    for cand in cands:
         if cand.is_file():
             load_dotenv(cand, override=False)
             return
+
+
+def _run_setup(args) -> int:
+    from .setup_wizard import render_report, run_setup
+    rep = run_setup(backend=args.backend, keys=args.keys, probe=not args.offline,
+                    force=args.force, json_out=args.json, console=console)
+    if args.json:
+        print(json.dumps(rep, indent=1, ensure_ascii=False, default=str))
+    else:
+        render_report(rep, console)
+    return 2 if rep.get("error") else 0
+
+
+def _run_uninstall(args) -> int:
+    from .setup_wizard import render_report, run_uninstall
+    rep = run_uninstall(yes=args.yes, json_out=args.json)
+    if args.json:
+        print(json.dumps(rep, indent=1, ensure_ascii=False, default=str))
+    else:
+        render_report(rep, console)
+    return 2 if rep.get("error") else 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -231,6 +255,17 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--version", action="version", version=f"gemini-mcp {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
+    p = sub.add_parser("setup", help="one-shot onboarding: keys+config in "
+                                     "~/.config/gemini-mcp, client snippets")
+    p.add_argument("--backend", choices=["direct", "router"],
+                   help="skip the fleet-vs-simple question")
+    p.add_argument("--keys", help="AI Studio keys, comma-separated (non-interactive)")
+    p.add_argument("--offline", action="store_true", help="skip the live key probe")
+    p.add_argument("--force", action="store_true", help="overwrite existing keys/config")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("uninstall", help="remove wizard-written keys+config")
+    p.add_argument("--yes", action="store_true")
+    p.add_argument("--json", action="store_true")
     sub.add_parser("stdio", help="run MCP over stdio (Freebuff via SSH)")
     p = sub.add_parser("serve", help="run MCP streamable-HTTP daemon + REST")
     p.add_argument("--bind")
@@ -254,6 +289,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--offline", action="store_true")
 
     args = ap.parse_args(argv)
+    if args.cmd in ("setup", "uninstall"):       # works even with a broken/absent config
+        return _run_setup(args) if args.cmd == "setup" else _run_uninstall(args)
     try:
         app_cfg, router_cfg = load_all(args.config)
     except Exception as e:  # noqa: BLE001 — config errors must be readable

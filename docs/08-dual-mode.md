@@ -65,7 +65,9 @@ mocked AI Studio: happy path + RPD decrement, 429-per-day → model switch, coun
 
 ## Follow-ups
 
-- M7.2 setup wizard: one question (fleet vs simple), writes config + .env, direct =
-  consumer default; then npm publish `@vernikr/gemini-mcp` 0.8.0.
+- M7.2 setup wizard — **DONE (0.8.0)**: `gemini-mcp setup` asks the one fleet-vs-simple
+  question, writes `~/.config/gemini-mcp/{config.yaml,.env 0600}`, probes keys live,
+  prints client snippets (direct = consumer default). npm publish `@vernikr/gemini-mcp`
+  0.8.0 is the remaining step.
 - Fleet VPS config.yaml: add explicit `backend: router` at next deploy (auto-detect
   already resolves correctly there via state.db, but pinning removes the heuristic).

@@ -75,10 +75,20 @@ class AppCfg(BaseModel):
     backend_resolved: str = ""               # filled at startup; shown in healthz/meta
 
 
+def config_home() -> Path:
+    """Wizard-managed config dir: $GEMINI_MCP_HOME or ~/.config/gemini-mcp (XDG-ish,
+    same on macOS/Linux). setup writes config.yaml + .env (0600) here."""
+    return Path(os.environ.get("GEMINI_MCP_HOME")
+                or Path.home() / ".config" / "gemini-mcp")
+
+
 def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConfig]:
     p = path or os.environ.get("GEMINI_MCP_CONFIG")
     if not p and Path("config.yaml").exists():
         p = "config.yaml"
+    if not p:                                   # consumer default (setup wizard output)
+        cand = config_home() / "config.yaml"
+        p = cand if cand.exists() else None
     raw: dict = {}
     if p and Path(p).exists():
         raw = yaml.safe_load(Path(p).read_text(encoding="utf-8")) or {}
