@@ -222,8 +222,8 @@ wheels = [
 ]
 
 [[package]]
-name = "gemini-mcp"
-version = "0.6.0"
+name = "gemini-mcp-gateway"
+version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "gemini-router" },

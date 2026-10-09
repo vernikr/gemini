@@ -11,3 +11,4 @@ logs/
 dist/
 *.egg-info/
 .DS_Store
+packaging/npm/.npmrc
