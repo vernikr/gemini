@@ -13,7 +13,9 @@ function uvx() {
   return ["npx", ["-y", "@astral-sh/uv", "uvx"]];   // uv self-installs via npm
 }
 const [cmd, base] = uvx();
-const res = spawnSync(cmd, [...base, `${CORE}==${VER}`, ...process.argv.slice(2)],
+// bin name != dist name: uvx needs --from (verified against PyPI 0.7.1)
+const res = spawnSync(cmd, [...base, "--from", `${CORE}==${VER}`, "gemini-mcp",
+  ...process.argv.slice(2)],
   { stdio: "inherit" });
 if (res.error) {
   console.error(`gemini-mcp: bootstrap failed: ${res.error.message}`);
