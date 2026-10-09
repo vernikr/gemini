@@ -1,6 +1,6 @@
 {
   "name": "@vernikr/gemini-mcp",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "One-command Gemini free-tier MCP gateway: quota-aware model routing, massive-body chunked analysis, file ingest (RTF/DOCX→Markdown), async tickets. Thin bootstrap for the Python core gemini-mcp-gateway.",
   "bin": {
     "gemini-mcp": "bin/gemini-mcp.js"
