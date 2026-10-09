@@ -36,6 +36,7 @@ class Deps:
     logger: logging.Logger
     jobs: JobManager = field(default_factory=JobManager)
     router_optimal: Router | None = None    # availability-ordered chain (route=optimal)
+    backend: str = "router"                 # 'router' (fleet) | 'direct' (AI Studio)
 
 
 _ROUGH_KEYS = ("retry", "retrying", "wait", "503", "fallback", "failed",
@@ -47,7 +48,8 @@ def _report(meta: dict) -> str:
     clients truncate tool descriptions (postmortem p01 follow-up)."""
     rough = [e for e in meta.get("progress_trace") or []
              if any(k in (e.get("message") or "").lower() for k in _ROUGH_KEYS)]
-    parts = [f"route={meta.get('route', '?')}",
+    parts = [f"backend={meta.get('backend', '?')}",
+             f"route={meta.get('route', '?')}",
              f"thinking={meta.get('thinking_level', '?')}",
              f"model={meta.get('model_final') or meta.get('model') or '?'}",
              f"req={meta.get('requests_spent', 1)}"
@@ -129,7 +131,7 @@ async def analyze_large_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
         text, meta = await pipeline.analyze(p)
     except (QuotaExhaustedError, PlanBudgetError) as e:
         raise _fail(deps, emitter, "analyze_large", p.request_id, e) from e
-    meta = {**meta, "route": p.route, "overflow": p.overflow,
+    meta = {**meta, "route": p.route, "overflow": p.overflow, "backend": deps.backend,
             "model_final": (meta.get("models_used") or [None])[-1]}
     deps.audit.record({
         "ts": time.time(), "tool": "analyze_large", "request_id": p.request_id,
@@ -166,8 +168,8 @@ async def gemini_generate_tool(deps: Deps, emitter: ProgressEmitter, params: dic
             "tokens_in": res.tokens_in, "tokens_out": res.tokens_out,
             "latency_s": res.latency_s, "cached": res.cached,
             "overflow_tier": res.overflow_tier, "quota_after": res.quota_after,
-            "route": route, "overflow": ovf, "thinking_level": req.thinking_level,
-            "progress_trace": emitter.trace}
+            "route": route, "overflow": ovf, "backend": deps.backend,
+            "thinking_level": req.thinking_level, "progress_trace": emitter.trace}
     deps.audit.record({"ts": time.time(), "tool": "gemini_generate",
                        "request_id": res.request_id, "model": res.model,
                        "route": route, "overflow": ovf,
@@ -259,6 +261,8 @@ async def quota_status_tool(deps: Deps) -> dict:
     router = _apply_route(deps, None, None)[0]     # default-route view
     rows = router.quota_table()
     rec = next((r for r in rows if r.get("recommended")), None)
+    counters = ("shared ledger (fleet truth)" if deps.backend == "router" else
+                "approximate: in-memory per process, resets on restart (direct mode)")
     return {
         "rows": rows,
         "recommended_model": rec["model"] if rec else None,
@@ -268,6 +272,7 @@ async def quota_status_tool(deps: Deps) -> dict:
                 "nothing available without waiting — see rpd_left/wait_s/cooldown_until "
                 "and reset_eta_pt"),
         "reset_eta_pt": iso(pt_midnight_ts(deps.router.cfg.quota_day_tz, days_ahead=1)),
+        "backend": deps.backend, "counters": counters,
     }
 
 

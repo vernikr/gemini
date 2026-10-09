@@ -10,11 +10,11 @@ import sys
 import time
 from pathlib import Path
 
-from gemini_router import Router
 from gemini_router.cli import cmd_calls, cmd_doctor, cmd_quota
 from rich.console import Console
 
 from . import __version__
+from .backends import make_routers, resolve_mode
 from .config import AppCfg, load_all
 from .logging_setup import AuditLogger, enforce_audit_size, prune_jsonl, redact, setup_logging
 from .tools import Deps
@@ -25,21 +25,19 @@ console = Console(stderr=True)
 def _deps(app_cfg: AppCfg, router_cfg) -> Deps:
     logger = setup_logging(app_cfg.logging,
                            secrets=[os.environ.get("GEMINI_MCP_TOKEN", "")])
-    router = Router(router_cfg)
-    router_optimal = None
-    chain = list(app_cfg.routing.optimal_chain or [])
-    if chain and chain != list(router_cfg.chain):
-        router_optimal = Router(router_cfg.model_copy(update={"chain": chain}))
+    router, router_optimal, mode = make_routers(app_cfg, router_cfg)
+    app_cfg.backend_resolved = mode
     audit = AuditLogger(app_cfg.logging,
                         secrets=[os.environ.get("GEMINI_MCP_TOKEN", "")])
     return Deps(router=router, app_cfg=app_cfg, audit=audit, logger=logger,
-                router_optimal=router_optimal)
+                router_optimal=router_optimal, backend=mode)
 
 
 def _run_stdio(app_cfg: AppCfg, router_cfg) -> int:
     from .server import build_server
     deps = _deps(app_cfg, router_cfg)
-    deps.logger.info("gemini-mcp %s starting (stdio)", __version__)
+    deps.logger.info("gemini-mcp %s starting (stdio, backend=%s)",
+                     __version__, deps.backend)
     build_server(deps).run(transport="stdio")
     return 0
 
@@ -94,19 +92,93 @@ def _run_logs(app_cfg: AppCfg, args) -> int:
 def _run_prune(app_cfg: AppCfg, router_cfg, args) -> int:
     lcfg = app_cfg.logging
     removed = prune_jsonl(lcfg, dry=args.dry)
-    router = Router(router_cfg)
+    router, _, mode = make_routers(app_cfg, router_cfg)
     res = router.ledger.prune(audit_keep_days=args.audit_days or lcfg.audit_keep_days,
                               cache_ttl_s=router_cfg.cache_ttl_h * 3600, dry=args.dry)
-    days = 0 if args.dry else enforce_audit_size(router.ledger, lcfg.audit_max_mb)
-    out = {"jsonl_removed": removed, **res, "audit_window_days_now": days or None,
-           "dry": args.dry}
+    days = (0 if args.dry or mode == "direct"
+            else enforce_audit_size(router.ledger, lcfg.audit_max_mb))
+    out = {"backend": mode, "jsonl_removed": removed, **res,
+           "audit_window_days_now": days or None, "dry": args.dry}
     console.print(json.dumps(out, default=str))
     return 0
 
 
+_DIRECT_COLD_NOTE = ("direct mode: quota counters live in-memory inside the running "
+                     "gateway process; this fresh-process view shows limits, not live "
+                     "spend (live: quota_status tool or meta.quota_after)")
+
+
+def _run_quota(app_cfg: AppCfg, router_cfg, args) -> int:
+    if resolve_mode(app_cfg, router_cfg) == "router":
+        return cmd_quota(router_cfg, args)
+    router, _, _ = make_routers(app_cfg, router_cfg)
+    rows = router.quota_table()
+    if args.json:
+        print(json.dumps({"backend": "direct", "note": _DIRECT_COLD_NOTE, "rows": rows},
+                         indent=1, default=str))
+        return 0
+    console.print(f"[bold cyan]Gemini quota (direct mode)[/bold cyan] — {_DIRECT_COLD_NOTE}")
+    for r in rows:
+        console.print(f"  {r['key_id']} {r['model']}: rpd {r['rpd_left']}/{r['rpd_limit']}"
+                      f" · rpm {r['rpm_used']}/{r['rpm_limit']}"
+                      + (f" · wait {r['wait_s']}s ({r['reason']})" if r["wait_s"] else "")
+                      + (" · [green]recommended[/green]" if r["recommended"] else ""))
+    return 0
+
+
+def _run_calls(app_cfg: AppCfg, router_cfg, args) -> int:
+    if resolve_mode(app_cfg, router_cfg) == "router":
+        return cmd_calls(router_cfg, args)
+    note = "direct mode keeps no persistent call log (in-process only)"
+    if args.json:
+        print(json.dumps({"calls": [], "note": note}, indent=1))
+        return 0
+    console.print(f"[yellow]{note}[/yellow]")
+    return 0
+
+
+def _doctor_direct(app_cfg: AppCfg, router_cfg, args) -> int:
+    """doctor without touching disk state (cmd_doctor would create a SQLite ledger)."""
+    import asyncio
+
+    from gemini_router.config import key_id
+    from gemini_router.ledger import iso, pt_midnight_ts
+    ok = True
+    console.print("[bold]gemini-router (direct mode — in-memory state)[/bold]")
+    if router_cfg.api_keys:
+        console.print(f"  keys: {len(router_cfg.api_keys)} → "
+                      + ", ".join(key_id(k) for k in router_cfg.api_keys))
+    else:
+        console.print("  [red]no API keys configured "
+                      "(GEMINI_API_KEYS / GEMINI_API_KEY_1..10)[/red]")
+        ok = False
+    tz_now = pt_midnight_ts(router_cfg.quota_day_tz)
+    console.print(f"  quota day ({router_cfg.quota_day_tz}): resets in "
+                  f"{(pt_midnight_ts(router_cfg.quota_day_tz, days_ahead=1) - tz_now) / 3600:.1f}"
+                  f" h (midnight was {iso(tz_now)[:19]} UTC)")
+    console.print(f"  chain: {' → '.join(router_cfg.chain)}")
+    console.print(f"  limits/key×model: {router_cfg.limits_per_key_model.model_dump()} · "
+                  f"wait: {router_cfg.wait.model_dump()}")
+    if not args.offline and router_cfg.api_keys:
+        async def _probe() -> None:
+            router, _, _ = make_routers(app_cfg, router_cfg)
+            try:
+                avail = await router.availability()
+                for kid, models in avail.items():
+                    console.print(f"  {kid}: " + (f"listModels OK ({len(models)} models)"
+                                                  if models is not None
+                                                  else "[yellow]listModels failed[/yellow]"))
+            finally:
+                await router.aclose()
+        asyncio.run(_probe())
+    return 0 if ok else 1
+
+
 def _run_doctor(app_cfg: AppCfg, router_cfg, args) -> int:
-    rc = cmd_doctor(router_cfg, args)
-    console.print(f"[bold]gemini-mcp {__version__}[/bold]")
+    mode = resolve_mode(app_cfg, router_cfg)
+    rc = (_doctor_direct(app_cfg, router_cfg, args) if mode == "direct"
+          else cmd_doctor(router_cfg, args))
+    console.print(f"[bold]gemini-mcp {__version__}[/bold] (backend={mode})")
     log_dir = Path(app_cfg.logging.dir)
     writable = os.access(log_dir.parent if not log_dir.exists() else log_dir, os.W_OK)
     console.print(f"  logs dir: {log_dir} (writable={writable})")
@@ -194,9 +266,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.cmd == "serve":
             return _run_serve(app_cfg, router_cfg, args)
         if args.cmd == "quota":
-            return cmd_quota(router_cfg, args)
+            return _run_quota(app_cfg, router_cfg, args)
         if args.cmd == "calls":
-            return cmd_calls(router_cfg, args)
+            return _run_calls(app_cfg, router_cfg, args)
         if args.cmd == "logs":
             return _run_logs(app_cfg, args)
         if args.cmd == "prune":

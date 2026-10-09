@@ -280,7 +280,8 @@ def build_server(deps: Deps) -> MCPServer:
 
     @srv.custom_route("/healthz", methods=["GET"])
     async def healthz(request: Request) -> JSONResponse:
-        return JSONResponse({"ok": True, "service": "gemini-mcp", "version": __version__})
+        return JSONResponse({"ok": True, "service": "gemini-mcp", "version": __version__,
+                             "backend": deps.backend})
 
     @srv.custom_route("/v1/quota", methods=["GET"])
     async def v1_quota(request: Request) -> JSONResponse:

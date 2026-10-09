@@ -71,6 +71,8 @@ class AppCfg(BaseModel):
     thinking: ThinkingCfg = Field(default_factory=ThinkingCfg)
     routing: RoutingCfg = Field(default_factory=RoutingCfg)
     ingest: IngestCfg = Field(default_factory=IngestCfg)
+    backend: str = "auto"                    # auto|direct|router (backends.py; 0.8.0)
+    backend_resolved: str = ""               # filled at startup; shown in healthz/meta
 
 
 def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConfig]:
@@ -82,7 +84,7 @@ def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConf
         raw = yaml.safe_load(Path(p).read_text(encoding="utf-8")) or {}
     app = AppCfg.model_validate({k: raw[k] for k in
                                  ("pipeline", "logging", "server", "thinking",
-                                  "routing", "ingest") if k in raw})
+                                  "routing", "ingest", "backend") if k in raw})
     router_cfg = RouterConfig.load(os.environ.get("GEMINI_ROUTER_CONFIG"),
                                    **raw.get("router", {}))
     return app, router_cfg
