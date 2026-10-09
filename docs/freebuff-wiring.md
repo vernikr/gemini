@@ -64,6 +64,11 @@ hand-copy it** (a stray character caused days of 401s); pull it over SSH:
 ssh root@<vps> 'grep GEMINI_MCP_TOKEN /opt/apps/gemini-mcp/.env | cut -d= -f2 | tr -d "\n"' | pbcopy
 ```
 
+Rotation: `bash scripts/rotate_token.sh` on the server (mints, restarts daemon,
+prints once), then the pipe above + the python mcp.json rewrite. SSH hardening
+(key-only root, no password brute-force surface, no firewall rules):
+`bash scripts/harden_sshd.sh` — run from an OPEN ssh session.
+
 ## Verify (2 minutes)
 
 1. In Freebuff, ask the agent: *"call quota_status on gemini"*. Expect a table with
