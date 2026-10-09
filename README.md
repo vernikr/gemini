@@ -15,6 +15,23 @@ a compact consolidated result — the agent's own context stays clean.
 - Deep progress to the caller (MCP progress + logging notifications + embedded trace),
   rotating disk logs, `gemini-mcp quota|logs|calls|doctor` in the terminal.
 - Transports: SSH-stdio (primary) and streamable HTTP daemon (`127.0.0.1`, bearer).
+- **Dual backend (0.8.0)**: `router` (fleet: shared SQLite ledger on the VPS) or
+  `direct` (plain Google AI Studio: same engine, in-memory counters, no server at all).
+  `backend: auto` picks router only when persistent state exists; env
+  `GEMINI_MCP_BACKEND` overrides. See [`docs/08-dual-mode.md`](docs/08-dual-mode.md).
+
+## Quickstart — no server (direct mode)
+
+```bash
+export GEMINI_API_KEYS="AIza...your AI Studio keys, comma-separated"
+uvx --from gemini-mcp-gateway gemini-mcp stdio      # MCP over stdio (any MCP client)
+uvx --from gemini-mcp-gateway gemini-mcp doctor     # keys/chain/limits + live probe
+```
+
+Direct mode needs nothing but API keys: quota counters are per-process approximations
+(reset on restart) and every response says `backend=direct` in its `report` line. Fleet
+deploys (VPS daemon + shared ledger) pin `backend: router` in config.yaml. The npm shim
+`@vernikr/gemini-mcp` (pnpm-first install) arrives with 0.8.0.
 
 ## Status
 
