@@ -80,11 +80,12 @@ def test_setup_probe_via_respx(tmp_path, monkeypatch):
 def test_uninstall_guard_and_removal(tmp_path, monkeypatch):
     home = _home(tmp_path, monkeypatch)
     run_setup(backend="direct", keys=K1, probe=False, json_out=True)
+    (home / "state.db").write_bytes(b"sqlite")            # local ledger (0.8.1)
     guard = run_uninstall(yes=False)
-    assert guard["error"] == "confirm_required" and len(guard["would_remove"]) == 2
+    assert guard["error"] == "confirm_required" and len(guard["would_remove"]) == 3
     assert (home / ".env").exists()
     rep = run_uninstall(yes=True)
-    assert len(rep["removed"]) == 2 and not home.exists()   # empty dir cleaned up
+    assert len(rep["removed"]) == 3 and not home.exists()  # empty dir cleaned up
     assert run_uninstall(yes=True)["note"] == "nothing to remove"
 
 

@@ -86,15 +86,28 @@ def test_resolve_mode_auto_direct_router_and_env(tmp_path, monkeypatch):
         resolve_mode(app, cfg)
 
 
-def test_make_routers_direct_shares_one_ledger(tmp_path, monkeypatch):
+def test_make_routers_direct_persists_local_ledger(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_MCP_HOME", str(tmp_path / "gmcp"))
     monkeypatch.delenv("GEMINI_MCP_BACKEND", raising=False)
     monkeypatch.delenv("GEMINI_ROUTER_CONFIG", raising=False)
+    monkeypatch.delenv("GEMINI_ROUTER_STATE", raising=False)
+    monkeypatch.chdir(tmp_path)
     app = AppCfg()
-    router, optimal, mode = make_routers(app, _cfg(tmp_path))
-    assert mode == "direct" and isinstance(router.ledger, MemLedger)
-    assert optimal is not None and optimal.ledger is router.ledger   # coherent counting
+    cfg = _cfg(tmp_path, state_path="state.db")     # default → maps into config home
+    router, optimal, mode = make_routers(app, cfg)
+    assert mode == "direct"
+    state = tmp_path / "gmcp" / "state.db"
+    assert router.ledger.path == str(state) and state.exists()
+    assert optimal is not None and optimal.ledger.path == str(state)   # one shared file
     assert optimal.cfg.chain == list(app.routing.optimal_chain)
-    assert not (tmp_path / "state.db").exists()                      # no disk side effect
+    from gemini_router.config import key_id as _kid
+    rid = router.ledger.plan(key_id=_kid("k1"), model="gemini-3.8-flash", kind="single",
+                             est_tokens=5, request_id=None, source="mcp")
+    router.ledger.resolve(rid, "ok", tokens_in=5, tokens_out=2)
+    router2, _, _ = make_routers(app, cfg)                           # simulate restart
+    left = {r["model"]: r["rpd_left"] for r in router2.model_budgets()}
+    assert left["gemini-3.8-flash"] == 19                            # spend survived
+    assert left["gemini-3.7-flash"] == 20
 
 
 # ---------------------------------------------------------------- E2E (respx)

@@ -262,7 +262,8 @@ async def quota_status_tool(deps: Deps) -> dict:
     rows = router.quota_table()
     rec = next((r for r in rows if r.get("recommended")), None)
     counters = ("shared ledger (fleet truth)" if deps.backend == "router" else
-                "approximate: in-memory per process, resets on restart (direct mode)")
+                "local persistent ledger — accurate on this machine, not shared "
+                "across machines (direct mode)")
     return {
         "rows": rows,
         "recommended_model": rec["model"] if rec else None,

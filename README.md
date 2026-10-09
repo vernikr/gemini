@@ -35,9 +35,11 @@ vars needed: the gateway auto-discovers `~/.config/gemini-mcp/`. Manual alternat
 stdio`. `gemini-mcp doctor` re-checks keys/chain/limits; `gemini-mcp uninstall --yes`
 removes everything the wizard wrote.
 
-Direct mode needs nothing but API keys: quota counters are per-process approximations
-(reset on restart) and every response says `backend=direct` in its `report` line. Fleet
-deploys (VPS daemon + shared ledger) pin `backend: router` in config.yaml. The npm shim
+Direct mode needs nothing but API keys. Usage is tracked in a LOCAL persistent ledger
+(`~/.config/gemini-mcp/state.db`): quota counters survive restarts and are shared by all
+gateway processes on the machine — but not across machines (that's fleet mode: VPS
+daemon + `backend: router`). Every response says `backend=direct` in its `report` line;
+`gemini-mcp uninstall --yes` removes keys, config and ledger together. The npm shim
 `@vernikr/gemini-mcp` (pnpm-first install) ships the same core at the same version.
 
 ## Status

@@ -95,29 +95,24 @@ def _run_prune(app_cfg: AppCfg, router_cfg, args) -> int:
     router, _, mode = make_routers(app_cfg, router_cfg)
     res = router.ledger.prune(audit_keep_days=args.audit_days or lcfg.audit_keep_days,
                               cache_ttl_s=router_cfg.cache_ttl_h * 3600, dry=args.dry)
-    days = (0 if args.dry or mode == "direct"
-            else enforce_audit_size(router.ledger, lcfg.audit_max_mb))
+    days = 0 if args.dry else enforce_audit_size(router.ledger, lcfg.audit_max_mb)
     out = {"backend": mode, "jsonl_removed": removed, **res,
            "audit_window_days_now": days or None, "dry": args.dry}
     console.print(json.dumps(out, default=str))
     return 0
 
 
-_DIRECT_COLD_NOTE = ("direct mode: quota counters live in-memory inside the running "
-                     "gateway process; this fresh-process view shows limits, not live "
-                     "spend (live: quota_status tool or meta.quota_after)")
-
-
 def _run_quota(app_cfg: AppCfg, router_cfg, args) -> int:
     if resolve_mode(app_cfg, router_cfg) == "router":
         return cmd_quota(router_cfg, args)
-    router, _, _ = make_routers(app_cfg, router_cfg)
+    router, _, _ = make_routers(app_cfg, router_cfg)     # live local ledger (0.8.1)
     rows = router.quota_table()
+    note = f"direct mode · local ledger: {router.ledger.path}"
     if args.json:
-        print(json.dumps({"backend": "direct", "note": _DIRECT_COLD_NOTE, "rows": rows},
+        print(json.dumps({"backend": "direct", "note": note, "rows": rows},
                          indent=1, default=str))
         return 0
-    console.print(f"[bold cyan]Gemini quota (direct mode)[/bold cyan] — {_DIRECT_COLD_NOTE}")
+    console.print(f"[bold cyan]Gemini quota (direct mode)[/bold cyan] — {note}")
     for r in rows:
         console.print(f"  {r['key_id']} {r['model']}: rpd {r['rpd_left']}/{r['rpd_limit']}"
                       f" · rpm {r['rpm_used']}/{r['rpm_limit']}"
@@ -129,22 +124,44 @@ def _run_quota(app_cfg: AppCfg, router_cfg, args) -> int:
 def _run_calls(app_cfg: AppCfg, router_cfg, args) -> int:
     if resolve_mode(app_cfg, router_cfg) == "router":
         return cmd_calls(router_cfg, args)
-    note = "direct mode keeps no persistent call log (in-process only)"
+    router, _, _ = make_routers(app_cfg, router_cfg)     # live local audit tail
+    rows = router.ledger.calls_tail(args.n, model=args.model, status=args.status,
+                                    source=args.source, request_id=args.request_id)
     if args.json:
-        print(json.dumps({"calls": [], "note": note}, indent=1))
+        print(json.dumps({"backend": "direct", "calls": rows}, indent=1, default=str))
         return 0
-    console.print(f"[yellow]{note}[/yellow]")
+    if not rows:
+        console.print("[yellow]no calls recorded yet (local ledger is fresh)[/yellow]")
+        return 0
+    for r in rows:
+        console.print(f"  {r['ts_iso']} {r['source']}/{r['kind']} {r['key_id']} "
+                      f"{r['model']} → {r['status']}"
+                      + (f" http={r['http_status']}" if r.get("http_status") else "")
+                      + (f" in={r['tokens_in']} out={r['tokens_out']}"
+                         if r.get("tokens_out") is not None else ""))
     return 0
 
 
 def _doctor_direct(app_cfg: AppCfg, router_cfg, args) -> int:
-    """doctor without touching disk state (cmd_doctor would create a SQLite ledger)."""
+    """doctor for direct mode: local ledger stats + key/chain/limits probe."""
     import asyncio
 
+    from gemini_router import Ledger
     from gemini_router.config import key_id
     from gemini_router.ledger import iso, pt_midnight_ts
+
+    from .backends import direct_state_path
     ok = True
-    console.print("[bold]gemini-router (direct mode — in-memory state)[/bold]")
+    console.print("[bold]gemini-router (direct mode — local ledger)[/bold]")
+    state = direct_state_path(router_cfg)
+    if Path(state).exists():
+        try:
+            console.print(f"  state: {state} · {Ledger(state).stats()}")
+        except Exception as e:  # noqa: BLE001
+            console.print(f"  [red]state unusable: {e}[/red]")
+            ok = False
+    else:
+        console.print(f"  state: {state} (not created yet — no calls recorded)")
     if router_cfg.api_keys:
         console.print(f"  keys: {len(router_cfg.api_keys)} → "
                       + ", ".join(key_id(k) for k in router_cfg.api_keys))

@@ -1,8 +1,9 @@
 """Dual-mode backends (0.8.0). 'router' = fleet mode: shared SQLite ledger (VPS daemon +
 SSH stdio — the stage-1 design, quota truth shared by every client). 'direct' = plain
-Google AI Studio: the SAME Router engine, REST protocol and error vocabulary, but with an
-in-memory MemLedger — no server, no disk state, per-process approximate counters (honest
-for a single consumer; a fleet needs shared truth, so fleet deploys pin backend: router).
+Google AI Studio: the SAME Router engine, REST protocol and error vocabulary, with a
+LOCAL persistent ledger under the config home (~/.config/gemini-mcp/state.db, 0.8.1) —
+no server, counters survive restarts and are shared by all gateway processes on this
+machine. MemLedger (in-memory, zero side effects) remains for live key probes.
 
 Mode: `backend: auto|direct|router` in config.yaml or GEMINI_MCP_BACKEND. auto → 'router'
 only when persistent state exists (GEMINI_ROUTER_CONFIG set or state_path file present),
@@ -189,19 +190,32 @@ def resolve_mode(app_cfg: AppCfg, router_cfg: RouterConfig) -> str:
     return mode
 
 
+def direct_state_path(router_cfg: RouterConfig) -> str:
+    """Where direct mode keeps its local ledger: an explicit state_path (config.yaml
+    router section / GEMINI_ROUTER_STATE) wins, else <config home>/state.db — one
+    predictable place the wizard manages and `uninstall` removes."""
+    from .config import config_home
+    return (router_cfg.state_path if router_cfg.state_path != "state.db"
+            else str(config_home() / "state.db"))
+
+
 def make_routers(app_cfg: AppCfg,
                  router_cfg: RouterConfig) -> tuple[Router, Router | None, str]:
-    """→ (default_router, optimal_route_router | None, mode). Direct mode shares ONE
-    MemLedger across both instances so in-process quota accounting stays coherent
-    (fleet mode shares the SQLite file the same way)."""
+    """→ (default_router, optimal_route_router | None, mode). Direct mode persists to a
+    LOCAL ledger under the config home (0.8.1, owner decision): counters survive
+    restarts and are coherent across every gateway process on this machine; they are
+    still per-machine — fleet truth needs router mode. Both instances share one state
+    file (WAL, multi-process safe) exactly like fleet mode shares the VPS one."""
     mode = resolve_mode(app_cfg, router_cfg)
     chain = list(app_cfg.routing.optimal_chain or [])
     want_optimal = bool(chain) and chain != list(router_cfg.chain)
     if mode == "direct":
-        ledger = MemLedger()
-        router = Router(router_cfg, ledger=ledger)
-        optimal = (Router(router_cfg.model_copy(update={"chain": chain}), ledger=ledger)
-                   if want_optimal else None)
+        state = direct_state_path(router_cfg)
+        cfg = router_cfg.model_copy(update={"state_path": state})
+        Path(state).parent.mkdir(parents=True, exist_ok=True)
+        router = Router(cfg)
+        optimal = (Router(cfg.model_copy(update={"chain": chain})) if want_optimal
+                   else None)
     else:
         router = Router(router_cfg)
         optimal = (Router(router_cfg.model_copy(update={"chain": chain}))

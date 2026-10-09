@@ -110,7 +110,8 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
             env_path.write_text(ENV_HEADER + line, encoding="utf-8")
             env_path.chmod(stat.S_IRUSR | stat.S_IWUSR)          # 0600: keys at rest
             report["overwritten" if existed else "created"].append(str(env_path))
-    cfg_body = {"backend": backend}
+    # logs live beside the config so stdio launches (cwd=$HOME) never litter ~/logs
+    cfg_body = {"backend": backend, "logging": {"dir": str(home / "logs")}}
     if cfg_path.exists() and not force:
         report["kept"].append(str(cfg_path))
     else:
@@ -135,7 +136,8 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
 
 def run_uninstall(*, yes: bool = False, json_out: bool = False) -> dict:
     home = config_home()
-    targets = [home / ".env", home / "config.yaml"]
+    targets = [home / ".env", home / "config.yaml", home / "state.db",
+               home / "state.db-wal", home / "state.db-shm"]
     present = [p for p in targets if p.exists()]
     report: dict = {"tool": "uninstall", "config_home": str(home),
                     "removed": [str(p) for p in present], "kept": []}
