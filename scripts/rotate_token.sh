@@ -13,5 +13,11 @@ mv "$ENVF.tmp" "$ENVF"; chmod 600 "$ENVF"
 systemctl restart gemini-mcp.service
 sleep 2
 systemctl is-active gemini-mcp.service
-echo "NEW TOKEN (copy via pipe, never by hand):"
-echo "$NEW"
+# AX/hygiene (postmortem p01): never print the full token by default — pastes and
+# terminal uploads leak it. Fetch over ssh pipe instead; --print only when alone.
+if [[ "${1:-}" == "--print" ]]; then
+  echo "$NEW"
+else
+  echo "NEW TOKEN stored. masked: ${NEW:0:8}…${NEW: -4}"
+  echo "fetch: ssh root@<vps> 'grep GEMINI_MCP_TOKEN /opt/apps/gemini-mcp/.env | cut -d= -f2 | tr -d \"\\n\"' | pbcopy"
+fi
