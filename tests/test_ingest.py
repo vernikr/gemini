@@ -4,6 +4,7 @@ bearer-exempt upload route. No network (b01)."""
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
@@ -181,25 +182,28 @@ async def test_ticket_refuses_over_cap_with_the_three_alternatives(tmp_path,
         assert word in payload["fix"], payload["fix"]
 
 
-async def test_oversize_needs_both_the_flag_and_the_owner(tmp_path, monkeypatch):
-    """override_size_limit alone is not enough — the server owner has to opt in, so
-    an agent can never talk itself past the cap."""
-    locked = _deps(tmp_path / "a", monkeypatch, max_file_mb=1)
-    (tmp_path / "a" / "inbox").mkdir(parents=True)
-    with pytest.raises(ToolError) as ei:
-        await file_upload_ticket_tool(locked, "big.txt", 3 * 1_048_576,
-                                      override_size_limit=True)
-    assert json.loads(str(ei.value))["error"] == "oversize_not_permitted"
+async def test_oversize_only_needs_the_callers_word_and_leaves_a_record(tmp_path,
+                                                                       monkeypatch):
+    """There is no server-side switch: override_size_limit is the whole gate, so the
+    compensating control is that the issuance is logged."""
+    deps = _deps(tmp_path, monkeypatch, max_file_mb=1)
+    records = []
 
-    open_ = _deps(tmp_path / "b", monkeypatch, max_file_mb=1, allow_oversize=True)
-    (tmp_path / "b" / "inbox").mkdir(parents=True)
-    ticket = await file_upload_ticket_tool(open_, "big.txt", 3 * 1_048_576,
+    class _Cap(logging.Handler):
+        def emit(self, r):
+            records.append(r.getMessage())
+
+    deps.logger.addHandler(_Cap())
+    deps.logger.setLevel(logging.WARNING)
+
+    ticket = await file_upload_ticket_tool(deps, "big.txt", 3 * 1_048_576,
                                            override_size_limit=True)
     assert ticket["oversize"] is True and ticket["upload_id"]
+    assert any("OVERSIZE" in m and "big.txt" in m and "3145728" in m for m in records), records
 
-    # the upload route trusts the ticket once the owner has opted in
-    srv = build_server(open_)
-    app = build_http_app(srv, open_.app_cfg, TOKEN)
+    # the signed ticket is the authority on size, so the route accepts it
+    srv = build_server(deps)
+    app = build_http_app(srv, deps.app_cfg, TOKEN)
     u = urlsplit(ticket["upload_url"])
     body = b"z" * (3 * 1_048_576)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
@@ -207,12 +211,21 @@ async def test_oversize_needs_both_the_flag_and_the_owner(tmp_path, monkeypatch)
         r = await c.put(f"{u.path}?{u.query}", content=body)
     assert r.status_code == 200 and r.json()["bytes"] == len(body)
 
+    # a body bigger than the ticket still refused, and nothing written for it
+    t2 = await file_upload_ticket_tool(deps, "big2.txt", 2 * 1_048_576,
+                                       override_size_limit=True)
+    u2 = urlsplit(t2["upload_url"])
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as c:
+        r2 = await c.put(f"{u2.path}?{u2.query}", content=b"q" * (3 * 1_048_576))
+    assert r2.status_code == 413 and r2.json()["error"] == "file_too_large"
+
 
 def test_default_cap_is_twenty_megabytes():
-    """Guards the measured ceiling: at ~11 MB of RSS per uploaded MB the service is
-    OOM-killed near 31 MB, so the default must stay well under that."""
+    """Guards the measured ceiling: peak RSS runs about 4.6 MB per uploaded MB, so a
+    350 MB MemoryMax is reached near 60 MB and the default must stay well under it."""
     from gemini_mcp.config import AppCfg
 
     cfg = AppCfg().ingest
     assert cfg.max_file_mb == 20
-    assert cfg.allow_oversize is False
+    assert not hasattr(cfg, "allow_oversize")     # the gate is the user's word, not a flag

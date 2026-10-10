@@ -49,7 +49,6 @@ server:
 ingest:                    # M4.5 file ingest (§9): tickets, inbox, retention
   dir: inbox
   max_file_mb: 20          # keeps one job inside MemoryMax; see docs/06
-  allow_oversize: false    # true = an agent may exceed it with the user's OK
   ticket_ttl_s: 900
   keep_hours: 24
   total_cap_mb: 500

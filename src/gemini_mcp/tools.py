@@ -220,12 +220,6 @@ async def file_upload_ticket_tool(deps: Deps, filename: str, size_bytes: int,
     if size_bytes <= 0:
         raise ToolError(json.dumps({"error": "bad_size",
                                     "hint": "size_bytes must be > 0"}))
-    if override_size_limit and not cfg.ingest.allow_oversize:
-        raise ToolError(json.dumps({
-            "error": "oversize_not_permitted", "bytes": size_bytes,
-            "max_bytes": max_bytes,
-            "hint": "the server has ingest.allow_oversize=false, so no caller may "
-                    "exceed the cap; shrink or split the file instead"}))
     if size_bytes > max_bytes and not override_size_limit:
         raise ToolError(json.dumps({
             "error": "file_too_large", "bytes": size_bytes, "max_bytes": max_bytes,
@@ -237,6 +231,13 @@ async def file_upload_ticket_tool(deps: Deps, filename: str, size_bytes: int,
     await asyncio.to_thread(ingest.prune, inbox, cfg.ingest.keep_hours,
                             cfg.ingest.total_cap_mb)
     upload_id, exp = ingest.issue_ticket(token, cfg.ingest.ticket_ttl_s)
+    if size_bytes > max_bytes:
+        # The only gate here is the user's consent, so leave a record of what was
+        # issued. Logged as well as returned: a chat transcript is not an audit trail.
+        deps.logger.warning(
+            "ingest: OVERSIZE ticket %s for %s — %d bytes against a %d-byte cap, "
+            "issued on override_size_limit at the user's explicit request",
+            upload_id, filename, size_bytes, max_bytes)
     ingest.reserve(inbox, upload_id, filename, size_bytes)
     sig = ingest.make_ticket(token, upload_id, exp, size_bytes)
     url = (f"http://{cfg.server.http_bind}:{cfg.server.http_port}"

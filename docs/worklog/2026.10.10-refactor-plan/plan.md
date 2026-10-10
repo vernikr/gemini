@@ -707,3 +707,75 @@ killed outright.
 The 20 MB default from §9 stays — it is the owner's decision, and it is now very
 conservative: 171 MB peak against a 350 MB ceiling, 178 MB of headroom. There is room
 to raise it later without touching the code.
+
+---
+
+## 11 · After the refactor — two items the owner asked to keep
+
+Not part of this refactor. Recorded here so they are not lost when the plan is
+archived; both are product work, not cleanup.
+
+### A · Files API support for binary files
+
+Today the gateway never sends file bytes to the model: `analyze_file` extracts text
+server-side (pandoc for DOCX/ODT/EPUB/HTML, native for RTF) and feeds the text
+pipeline. Anything that is not text fails fast with `binary_file_needs_conversion`.
+That is the right call for documents and it is why no provider payload limit binds us
+— but it means PDFs, images and audio cannot be analysed at all.
+
+The Files API is how they would be: upload the bytes, reference the returned URI in the
+request. Limits, from the provider's own documentation: 2 GB per file, 20 GB per
+project, 48-hour retention, and the file cannot be downloaded back — so it is staging,
+not storage. Inline payloads are capped separately (100 MB, 50 MB for PDF), which is
+where the widely-quoted "20 MB" comes from: that was the old inline figure.
+
+Decisions this needs before code: what to do about the 48-hour expiry when a job is
+retried later; whether uploads count against the ledger (they are not generateContent
+calls, so they spend no RPD but do cost quota elsewhere); and whether binary analysis
+shares the memory envelope measured in §10 or needs its own, since the model does the
+heavy lifting instead of our chunker.
+
+### B · Using the router from more places
+
+The owner wants the same Gemini access — keys, quotas, ledger — reachable from a
+macOS desktop app, from utilities on the VPS itself (including over SSH), and from
+wherever else comes up. The question is whether that is router work, a new bridge
+project, or both.
+
+What is already true, and matters for the answer:
+
+- `gemini-router` is a **library**, deliberately dependency-light (`httpx`, `pydantic`,
+  `rich`, stdlib) and MCP-agnostic. It already has three consumers: `gemini-mcp`,
+  `external-consumer` (as a sync facade), and outsiders. Nothing about it assumes a server.
+- Quota truth already lives in a **shared SQLite ledger**, WAL mode with
+  `busy_timeout`, and `test_cross_instance_sharing` covers two processes on one file.
+  On the VPS that file is `/opt/apps/shared/gemini-router/state.db` and every gateway
+  process already shares it.
+- `gemini-mcp` is an **MCP server with an HTTP mode** (`serve`, `127.0.0.1:8790`,
+  bearer-guarded) and an SSH-stdio mode. A process that speaks neither MCP nor that
+  HTTP surface cannot use it today.
+
+So the shape of the answer:
+
+1. **A VPS-internal utility needs nothing new.** It imports `gemini-router`, points
+   `state_path` at the shared ledger, and gets correct accounting for free. The only
+   work is packaging/ergonomics — a small CLI or a documented import recipe. This is
+   router work, and cheap.
+2. **A macOS desktop app is the real question.** It could embed the library and talk
+   to the shared ledger — but the ledger is on the VPS, and putting a SQLite file on a
+   network mount is the wrong way to share a WAL database. The honest options are
+   either the existing HTTP surface (already built, already bearer-guarded, needs the
+   SSH tunnel the docs already describe) or a new thin service exposing the router over
+   plain HTTP/gRPC for non-MCP clients.
+3. **A separate bridge project is probably not needed yet.** `gemini-mcp`'s HTTP mode
+   already is that bridge; what it lacks is a non-MCP-friendly surface — a plain
+   `POST /v1/complete` exists, so a desktop app can use it today. Build the second
+   service only when a consumer appears that the existing surface genuinely cannot
+   serve, or the two start wanting different lifecycles.
+
+Recommended approach: treat `gemini-router` as the single place quota logic lives and
+refuse to let it grow transport concerns; add transports as thin adapters. Concretely,
+first make the library pleasant to embed (a documented sync facade and a stable
+"point at the shared ledger" recipe — `external-consumer` is the proof it works), then point
+the desktop app at the existing HTTP endpoint, and only then consider a dedicated
+bridge if a concrete consumer demands one.

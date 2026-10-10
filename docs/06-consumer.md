@@ -187,11 +187,14 @@ is unreadable for the model (non-ASCII text survives as hex escapes).
 
 Per-upload cap: `ingest.max_file_mb`. It is a memory guard sized against the service's
 `MemoryMax`, not a provider limit — the pipeline holds the extracted text in RAM while
-chunking, and the measured cost is roughly 11 MB of RSS per uploaded megabyte, so the
-unit is OOM-killed near 31 MB regardless of what this setting says. Set it no higher
-than you can afford to lose the service over. `ingest.allow_oversize: true` lets an
-agent exceed it with `override_size_limit` after the user accepts that risk; left at
-`false`, the cap is absolute and no caller can talk its way past it.
+chunking, at roughly 4.6 MB of RSS per uploaded megabyte, so a 350 MB ceiling is
+reached near 60 MB of Cyrillic text and sooner for Latin scripts, which pack more
+characters per byte. Set it no higher than you can afford to lose the service over.
+
+An agent can exceed the cap per call with `override_size_limit`, which the tool
+instructions tell it to use only after the user has agreed in chat, having been told
+the service may die mid-job. Every such ticket is logged to `app.log` with its size and
+filename. There is no server-side switch — the user's consent is the gate.
 
 Terminal (no client needed):
 

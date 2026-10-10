@@ -277,10 +277,12 @@ async def test_upload_enforces_the_ticket_size(tmp_path, monkeypatch):
                 f"&sig={make_ticket('tok123', uid, exp, size)}")
 
     async with await _client(app) as c:
-        # declared over the configured cap → refused, nothing buffered or written
-        r = await c.put(url("u1", 5 * 1_048_576), content=b"x" * 1024)
-        assert r.status_code == 413 and r.json()["error"] == "file_too_large"
-        assert r.json()["max_bytes"] == 1_048_576
+        # A ticket declaring more than the cap is honoured: the cap is enforced where
+        # the caller's consent is known — the ticket tool — and the signature is what
+        # makes the declaration trustworthy. The route's job is integrity, not policy.
+        big = b"x" * (2 * 1_048_576)
+        r = await c.put(url("u1", len(big)), content=big)
+        assert r.status_code == 200 and r.json()["bytes"] == len(big)
 
         # Content-Length over the ticket's size → refused before the body is read
         r = await c.put(url("u2", 1024), content=b"x" * 4096)
@@ -299,4 +301,4 @@ async def test_upload_enforces_the_ticket_size(tmp_path, monkeypatch):
         assert (inbox / "u3").read_bytes() == b"y" * 1024
 
     stored = {p.name for p in inbox.iterdir()}
-    assert stored == {"u3"}
+    assert stored == {"u1", "u3"}

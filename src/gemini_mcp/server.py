@@ -76,10 +76,12 @@ what you need to send adds up to more, work down this list:
     are NOT accepted.
  2. Split it — several uploads and several analyze_file calls, then combine the
     answers yourself. Each call is charged separately; say so in your report.
- 3. Only if neither works, ask the user for explicit permission to exceed the cap and
-    tell them plainly the service may be killed mid-job, taking other work with it.
-    If they agree, retry with override_size_limit=true. The server refuses that flag
-    unless its owner enabled ingest.allow_oversize — it is never your call.
+ 3. Only if neither works, ask the user — in this chat, before you act — for explicit
+    permission to exceed the cap. Tell them plainly that the service may be killed
+    mid-job, taking other people's unfinished work with it, and how far over you need
+    to go. If and only if they say yes, retry with override_size_limit=true. Their
+    consent is the only gate: nothing on the server will stop you, so do not treat a
+    vague "sure, try it" about something else as permission for this.
 Do not paste a large file into 'body' to get around this: analyze_large rejects raw
 documents, and a huge paste costs the same memory without the ticket's protections."""
 
@@ -256,8 +258,9 @@ def build_server(deps: Deps) -> MCPServer:
         analyzed, RTF is extracted server-side, binaries fail fast with zero quota
         spent.
 
-        override_size_limit: only after the user has explicitly accepted the risk, and
-        only when the server permits it. See FILE INGEST for what to try first."""
+        override_size_limit: exceeds the size cap. Only after the user has explicitly
+        agreed to it in this chat, having been told the service may die mid-job. See
+        FILE INGEST for what to try first."""
         return await file_upload_ticket_tool(deps, filename, size_bytes,
                                              override_size_limit)
 
@@ -374,30 +377,26 @@ def build_server(deps: Deps) -> MCPServer:
             verify_ticket(token, uid, q.get("exp", ""), q.get("size", ""),
                           q.get("sig", ""))
             limit = cfgi.max_file_mb * 1_048_576
-            # The signature binds the upload to its declared size, so that size is the
-            # cap — checked BEFORE buffering, or an oversized body could consume the
-            # whole memory budget before any check ran. With the owner's escape hatch
-            # on, the ticket itself is the authority: the ticket tool already refused
-            # anything it was not allowed to issue.
+            # The signed ticket is the authority on size: the ticket tool refuses
+            # anything over the cap unless the caller overrode it with the user's
+            # consent. Checked BEFORE buffering, or an oversized body could consume
+            # the whole memory budget before any check ran.
             declared = int(q["size"])
-            cap = declared if cfgi.allow_oversize else min(declared, limit)
             over = (request.headers.get("content-length") or "").isdigit() \
-                and int(request.headers["content-length"]) > cap
-            if over or declared > cap:
+                and int(request.headers["content-length"]) > declared
+            if over:
                 raise IngestError("file_too_large",
-                                  bytes=int(request.headers.get("content-length",
-                                                                declared)),
-                                  max_bytes=cap)
+                                  bytes=int(request.headers["content-length"]),
+                                  max_bytes=declared)
             data = await request.body()
             if len(data) != declared:      # chunked or lying Content-Length
                 raise IngestError("size_mismatch", bytes=len(data), expected=declared,
                                   hint="body must match the size the ticket was issued "
                                        "for; issue a fresh file_upload_ticket")
-            path = save_upload(Path(cfgi.dir), uid, data, cap)
+            path = save_upload(Path(cfgi.dir), uid, data, max(declared, limit))
         except IngestError as e:
             code = {"ticket_expired": 410, "already_uploaded": 409,
                     "file_too_large": 413, "size_mismatch": 413,
-                    "oversize_not_permitted": 403,
                     "ingest_disabled": 503}.get(e.payload["error"], 400)
             return JSONResponse(e.payload, status_code=code)
         deps.logger.info("ingest: stored %s (%d bytes)", uid, path.stat().st_size)
