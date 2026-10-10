@@ -25,19 +25,21 @@ the quota) → live listModels probe → writes `~/.config/gemini-mcp/`:
 | `config.yaml` | `backend: direct` + `logging.dir` under the same home |
 | `state.db` | local usage ledger (created on first call; survives restarts) |
 
-Non-interactive: `… setup --backend direct --keys 'AIza…,AIza…' --json`.
+Non-interactive: `… setup --backend direct --keys-file keys.txt --write-client
+freebuff --json` (machine-readable report: `ok`, `steps`, `verify_prompt`, and every
+failure with a `fix` — built for AI agents; see README §Quick start).
 Undo everything: `… uninstall --yes`.
 
 ## 2. Add to your MCP client (JSON)
 
-`setup` **prints** the JSON block but never edits client configs itself (formats differ
-per client; auto-write is planned as M7.5). The printout is mode-aware: direct mode says
-**paste NOW** and shows the full `{"mcpServers": …}` wrapper (npx form when `npx` is on
-PATH, uvx-pinned otherwise, plus where each client's config lives). Fleet mode (0.10.0+)
-**deploys the server for you** — repos, provisioning, keys, healthcheck — and then also
-ends with a paste-NOW block carrying your real host; only if the auto-deploy can't run
-(missing host, no git/ssh auth, Windows) it falls back to short numbered manual steps.
-Two wiring forms:
+`setup` **prints** the JSON block and, since 0.11.0, can also **write** it itself:
+`--write-client freebuff|claude|cursor` (repeatable) merges the `gemini` entry into
+that client's config with a timestamped `.bak` backup; a broken existing JSON is
+never clobbered — you get a `fix` instead. The printout is mode-aware: direct mode
+and a successfully deployed fleet both end with the same paste-now block and a
+numbered checklist (`steps` + highlighted `verify_prompt` in the report); only if the
+fleet auto-deploy can't run (missing host, no git/ssh auth, Windows) it falls back to
+short numbered manual steps. Two wiring forms:
 
 - **After the wizard** (option A): keys already live in `~/.config/gemini-mcp/.env` —
   the block below needs no env.

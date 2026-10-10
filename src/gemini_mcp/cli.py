@@ -269,7 +269,8 @@ def _run_setup(args) -> int:
     rep = run_setup(backend=args.backend, keys=keys, probe=not args.offline,
                     force=args.force, json_out=args.json, console=console,
                     vps_host=args.vps_host, vps_user=args.vps_user,
-                    projects_dir=args.projects_dir)
+                    projects_dir=args.projects_dir,
+                    write_clients=args.write_clients)
     if args.json:
         print(json.dumps(rep, indent=1, ensure_ascii=False, default=str))
     else:
@@ -313,6 +314,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--projects-dir", help="fleet: folder for the repo clones "
                                           "(default ~/projects; cloned or updated "
                                           "automatically)")
+    p.add_argument("--write-client", action="append", dest="write_clients",
+                   choices=["freebuff", "claude_desktop", "claude", "cursor"],
+                   help="also MERGE the gemini entry into that client's mcp.json "
+                        "(timestamped .bak backup; repeatable — leaves only "
+                        "'restart the client' for the human)")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("uninstall", help="remove wizard-written keys+config")
     p.add_argument("--yes", action="store_true")

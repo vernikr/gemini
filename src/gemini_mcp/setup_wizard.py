@@ -30,9 +30,76 @@ from .config import config_home
 FLEET_REPOS = ("gemini-mcp", "gemini-router")     # github.com/vernikr/<name>, private
 FLEET_HEALTHZ = "curl -fsS --max-time 3 http://127.0.0.1:8790/healthz"
 
+# Same JSON shape everywhere: {"mcpServers": {"gemini": {…}}} — safe to merge.
+CLIENT_CONFIGS = {
+    "freebuff": "~/.agents/mcp.json",
+    "claude_desktop": "~/Library/Application Support/Claude/claude_desktop_config.json",
+    "cursor": "~/.cursor/mcp.json"}
+CLIENT_ALIASES = {"claude": "claude_desktop"}
+VERIFY_PROMPT = ('Use the quota_status tool from the "gemini" MCP server and show '
+                 'me the current quotas.')
+
 
 class SetupError(RuntimeError):
     """Readable one-line failure for the fleet auto-deploy (rendered, never traceback)."""
+
+
+def _primary_entry(snippets: dict) -> dict:
+    """The mcpServers entry a client should get: fleet = ssh, direct = npx if present
+    (pnpm-first product) else version-pinned uvx."""
+    if snippets.get("ssh"):
+        return snippets["ssh"]
+    return snippets["pnpm_npx"] if shutil.which("npx") else snippets["uvx_pinned"]
+
+
+def _write_client_configs(names: list[str], entry: dict, deployed_fleet: bool,
+                          report: dict) -> None:
+    """Merge the `gemini` entry into each client's mcp.json (backup first). Every
+    failure is a structured {client, error, fix} — an agent can act on it without
+    reading prose."""
+    for raw in names:
+        name = CLIENT_ALIASES.get(raw, raw)
+        rel = CLIENT_CONFIGS.get(name)
+        if not rel:
+            report.setdefault("clients_failed", []).append(
+                {"client": raw, "error": "unknown client",
+                 "fix": f"--write-client accepts: {', '.join(CLIENT_CONFIGS)}"})
+            continue
+        path = Path(rel).expanduser()
+        if not deployed_fleet and entry.get("command") == "ssh" \
+                and "<" in " ".join(entry.get("args", [])):
+            report.setdefault("clients_failed", []).append(
+                {"client": name, "path": str(path),
+                 "error": "server not deployed yet — the snippet still has a "
+                          "<YOUR_VPS> placeholder",
+                 "fix": "finish the deploy first (deploy_steps above), then re-run "
+                        "with --write-client"})
+            continue
+        data: dict = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8") or "{}")
+                if not isinstance(data, dict) or not isinstance(
+                        data.get("mcpServers", {}), dict):
+                    raise ValueError("not an {\"mcpServers\": {…}} object")
+            except Exception as e:  # noqa: BLE001 — never clobber a broken config
+                report.setdefault("clients_failed", []).append(
+                    {"client": name, "path": str(path),
+                     "error": f"existing config is unusable ({e})",
+                     "fix": f"repair the JSON in {path} (or remove it), then re-run; "
+                            "or paste the block manually"})
+                continue
+            backup = path.with_name(f"{path.name}.bak-{time.strftime('%Y%m%d-%H%M%S')}")
+            backup.write_bytes(path.read_bytes())
+        else:
+            backup = None
+        data.setdefault("mcpServers", {})["gemini"] = entry
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n",
+                        encoding="utf-8")
+        report.setdefault("clients_written", []).append(
+            {"client": name, "path": str(path),
+             "backup": str(backup) if backup else None})
 
 ENV_HEADER = ("# gemini-mcp credentials — written by `gemini-mcp setup` (mode 0600).\n"
               "# Keys: https://aistudio.google.com/app/apikey (free tier).\n")
@@ -50,10 +117,7 @@ def _client_snippets(backend: str, fleet: dict | None = None,
     Fleet: after the wizard's own auto-deploy succeeded it is ALSO paste-now (with the
     real host baked in); otherwise fall back to short manual steps (no repo-doc refs —
     dlx users don't have the repo)."""
-    paste_where = {"freebuff": "~/.agents/mcp.json",
-                   "claude_desktop": "~/Library/Application Support/Claude/"
-                                     "claude_desktop_config.json",
-                   "cursor": "~/.cursor/mcp.json"}
+    paste_where = dict(CLIENT_CONFIGS)
     if backend == "direct":
         return {"paste_now": True,
                 "pnpm_npx": {"command": "npx",
@@ -200,7 +264,9 @@ def _provision(repo: Path, host: str, user: str) -> None:
     r = subprocess.run(["bash", str(script), "setup"], cwd=str(repo), env=env)
     if r.returncode != 0:
         raise SetupError(f"provisioning failed (run_remote.sh rc={r.returncode}; "
-                         "its output is above)")
+                         "its output is above) — fix: verify ssh works "
+                         f"(`ssh {user}@{host} 'echo ok'`, key auth), rsync is "
+                         "installed on both ends, then re-run the same command")
 
 
 def _push_keys(host: str, user: str, keys_csv: str) -> None:
@@ -212,7 +278,9 @@ def _push_keys(host: str, user: str, keys_csv: str) -> None:
     r = _ssh(host, user, remote, input=keys_csv + "\n", timeout=40, batch=False)
     if r.returncode != 0:
         raise SetupError("could not write keys to the server .env (ssh rc="
-                         f"{r.returncode}: {(r.stderr or '').strip()[:160]})")
+                         f"{r.returncode}: {(r.stderr or '').strip()[:160]}) — fix: "
+                         "provisioning must have run once (.env is created there); "
+                         f"check `ssh {user}@{host} 'ls -la /opt/apps/gemini-mcp/.env'`")
 
 
 def deploy_fleet(*, host: str, user: str, projects_dir: Path,
@@ -266,7 +334,8 @@ async def _probe_keys(keys: list[str]) -> list[dict]:
 def run_setup(*, backend: str | None = None, keys: str | None = None,
               probe: bool = True, force: bool = False, json_out: bool = False,
               console=None, vps_host: str | None = None, vps_user: str | None = None,
-              projects_dir: str | None = None) -> dict:
+              projects_dir: str | None = None,
+              write_clients: list[str] | None = None) -> dict:
     """Interactive when neither --backend/--keys nor --json pins the flow. Fleet mode
     auto-deploys the server side (clone/pull repos → run_remote.sh → keys → health)
     and finishes with a paste-NOW snippet carrying the real host. Returns the report
@@ -314,8 +383,9 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
         report["fleet"] = fleet
     if (backend == "direct" and keys is None and json_out
             and not os.environ.get("GEMINI_API_KEYS")):
-        report["error"] = ("keys required in --json mode: pass --keys 'AIza…' or set "
-                           "GEMINI_API_KEYS")
+        report["error"] = ("keys required in --json mode: pass --keys 'AIza…', "
+                           "--keys-file <path>, or set GEMINI_API_KEYS")
+        report["ok"] = False
         return report
     if keys is None and not json_out and backend == "direct":
         if console:
@@ -331,6 +401,7 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
         if not key_list:
             report["error"] = ("no API keys provided — re-run and paste at least one "
                                "AI Studio key (or --keys 'AIza…')")
+            report["ok"] = False
             return report
         report["key_ids"] = [key_id(k) for k in key_list]
         line = "GEMINI_API_KEYS=" + ",".join(key_list) + "\n"
@@ -382,21 +453,37 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
                 report["deploy_error"] = f"{type(e).__name__}: {e}"[:300]
     report["snippets"] = _client_snippets(backend, fleet=fleet or None,
                                           deployed=deployed)
-    if backend == "direct":
-        report["next"] = (
-            "paste the snippet below into your MCP client config NOW (one time), "
-            "restart the client fully; the first call takes ~10–20 s (one-time "
-            "dependency resolve). Verify: ask the agent to call the quota_status tool.")
-    elif deployed:
-        report["next"] = (
-            "server deployed ✓ — paste the snippet below into your MCP client config "
-            "NOW (one time) and restart the client fully. Keys and the shared quota "
-            "ledger live on the server; nothing secret is stored on this machine. "
-            "Verify: ask the agent to call the quota_status tool.")
+    if write_clients:
+        _write_client_configs(write_clients, _primary_entry(report["snippets"]),
+                              deployed_fleet=(backend == "router" and deployed),
+                              report=report)
+    written = report.get("clients_written") or []
+    if backend == "router" and not deployed:
+        steps = ["finish the server deploy with the steps above, then RE-RUN this "
+                 "same command — it verifies the server and writes the client "
+                 "config itself with --write-client",
+                 "paste the final ssh block into your MCP client config and "
+                 "restart the client fully",
+                 'verify — send your agent the prompt below (MCP server "gemini", '
+                 "tool quota_status)"]
     else:
-        report["next"] = (
-            f"auto-deploy did not finish ({report.get('deploy_error', '?')[:120]}) — "
-            "do the numbered steps below once, then paste the ssh snippet.")
+        if written:
+            steps = ["client config written: " + "; ".join(
+                f"{w['client']} → {w['path']}"
+                + (f" (backup: {w['backup']})" if w.get("backup") else "")
+                for w in written)]
+        else:
+            steps = ["paste the JSON block above into your MCP client config "
+                     "(file paths are listed under the block)"]
+        steps.append("restart the client fully (configs are read at startup)"
+                     + ("; the first gemini call takes ~10–20 s — one-time dependency "
+                        "resolve" if backend == "direct" else ""))
+        steps.append("verify — send your agent the prompt below; the quota_status "
+                     'tool lives in the MCP server named "gemini"')
+    report["steps"] = steps
+    report["verify_prompt"] = VERIFY_PROMPT
+    report["ok"] = not (report.get("error") or report.get("deploy_error")
+                        or report.get("clients_failed"))
     return report
 
 
@@ -454,22 +541,28 @@ def render_report(rep: dict, console) -> None:
                       f"{', '.join(rep['fleet']['key_ids'])} (fingerprints)")
     if rep.get("deploy_error"):
         console.print(f"  [yellow]deploy: {rep['deploy_error']}[/yellow]")
+    for w in rep.get("clients_written") or []:
+        console.print(f"  [green]✓ wrote[/green] {w['client']}: {w['path']}"
+                      + (f" [dim](backup: {w['backup']})[/dim]" if w.get("backup") else ""))
+    for f in rep.get("clients_failed") or []:
+        console.print(f"  [red]✗ {f['client']}:[/red] {f['error']}")
+        console.print(f"    [yellow]fix:[/yellow] {f['fix']}")
     snip = rep.get("snippets") or {}
     if snip.get("paste_now"):
-        entry = snip.get("ssh")                   # fleet, deployed → real host baked in
-        alt = None
-        if entry is None:                         # direct → npx/uvx by PATH
-            primary = "pnpm_npx" if shutil.which("npx") else "uvx_pinned"
-            alt = "uvx_pinned" if primary == "pnpm_npx" else "pnpm_npx"
-            entry = snip[primary]
-        console.print("[bold green]▶ Paste this into your MCP client config NOW[/bold green] "
-                      "(one time — it is the whole wiring):")
+        entry = _primary_entry(snip)
+        written = rep.get("clients_written") or []
+        if written:
+            console.print("[bold green]▶ Client config written — this block went "
+                          "in:[/bold green]")
+        else:
+            console.print("[bold green]▶ The whole wiring is this one block:[/bold green]")
         console.print(json.dumps({"mcpServers": {"gemini": entry}}, indent=1))
-        for name, path in (snip.get("paste_where") or {}).items():
-            console.print(f"    [dim]{name}:[/dim] {path}")
-        if alt:
+        if not written:
+            for name, path in (snip.get("paste_where") or {}).items():
+                console.print(f"    [dim]{name}:[/dim] {path}")
+        if snip.get("pnpm_npx") and entry == snip.get("pnpm_npx"):
             console.print(f"  [dim]equivalent alternative form: "
-                          f"{json.dumps(snip[alt], ensure_ascii=False)}[/dim]")
+                          f"{json.dumps(snip['uvx_pinned'], ensure_ascii=False)}[/dim]")
     elif snip.get("ssh"):
         console.print("[bold yellow]▶ Server not deployed yet — do NOT paste into "
                       "your client.[/bold yellow] Fastest path:")
@@ -477,5 +570,10 @@ def render_report(rep: dict, console) -> None:
             console.print(f"  {i}. {step}")
         console.print("  [bold]then[/bold] paste:")
         console.print(json.dumps({"mcpServers": {"gemini": snip["ssh"]}}, indent=1))
-    if rep.get("next"):
-        console.print(f"[dim]next: {rep['next']}[/dim]")
+    steps = rep.get("steps") or []
+    if steps:
+        console.print("[bold]Do this now:[/bold]")
+        for i, s in enumerate(steps, 1):
+            console.print(f"  [bold]{i}.[/bold] {s}")
+        if rep.get("verify_prompt"):
+            console.print(f"     [bold cyan]“{rep['verify_prompt']}”[/bold cyan]")

@@ -268,7 +268,7 @@ def test_render_report_mode_guidance(tmp_path, monkeypatch):
     buf = io.StringIO()
     render_report(rep_d, Console(file=buf, force_terminal=False, width=100))
     txt = buf.getvalue()
-    assert "Paste this into your MCP client config NOW" in txt
+    assert "The whole wiring is this one block" in txt
     assert "mcpServers" in txt and ".agents/mcp.json" in txt
 
     # fleet, auto-deploy SUCCEEDED → same green paste-now block, real host inside
@@ -278,8 +278,8 @@ def test_render_report_mode_guidance(tmp_path, monkeypatch):
     buf = io.StringIO()
     render_report(rep_ok, Console(file=buf, force_terminal=False, width=100))
     txt = buf.getvalue()
-    assert "Paste this into your MCP client config NOW" in txt and "root@YOUR_VPS_HOST" in txt
     assert "Do NOT paste" not in txt and "<YOUR_VPS>" not in txt
+    assert "root@YOUR_VPS_HOST" in txt and "Do this now:" in txt
 
     # fleet, no host → yellow manual fallback (numbered, self-contained)
     rep_f = run_setup(backend="router", json_out=True, force=True)
@@ -328,3 +328,84 @@ def test_ask_keys_file_skip_and_crash_guard(tmp_path, monkeypatch):
         raise OSError("tty died")
     monkeypatch.setattr(sw.getpass, "getpass", boom)
     assert sw._ask_keys(None, purpose="x", default="1") is None   # no traceback
+
+
+def test_steps_and_verify_prompt(tmp_path, monkeypatch):
+    """The report ends with a numbered checklist; no duplicated `next` prose."""
+    _home(tmp_path, monkeypatch)
+    rep = run_setup(backend="direct", keys=K1, probe=False, json_out=True)
+    assert rep["ok"] is True and "next" not in rep
+    assert len(rep["steps"]) == 3 and rep["steps"][0].startswith("paste the JSON")
+    assert "restart the client" in rep["steps"][1]
+    assert "quota_status" in rep["verify_prompt"] and "gemini" in rep["verify_prompt"]
+
+
+def test_write_client_merges_and_backs_up(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".agents").mkdir()
+    cfg = tmp_path / ".agents" / "mcp.json"
+    cfg.write_text(json.dumps({"mcpServers": {"other": {"command": "keep-me"}}}))
+    rep = run_setup(backend="direct", keys=K1, probe=False, json_out=True,
+                    write_clients=["freebuff"])
+    w = rep["clients_written"][0]
+    assert w["client"] == "freebuff" and w["backup"]
+    data = json.loads(cfg.read_text())
+    assert data["mcpServers"]["other"] == {"command": "keep-me"}    # neighbor kept
+    assert data["mcpServers"]["gemini"]["command"] in ("npx", "uvx")
+    assert rep["steps"][0].startswith("client config written") and rep["ok"] is True
+
+
+def test_write_client_bad_json_readable_and_safe(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    (tmp_path / ".agents").mkdir()
+    (tmp_path / ".agents" / "mcp.json").write_text("{broken")
+    rep = run_setup(backend="direct", keys=K1, probe=False, json_out=True,
+                    write_clients=["freebuff"])
+    assert rep["ok"] is False
+    f = rep["clients_failed"][0]
+    assert f["client"] == "freebuff" and f["fix"]
+    assert (tmp_path / ".agents" / "mcp.json").read_text() == "{broken"  # untouched
+
+
+def test_write_client_fleet_placeholder_guard(tmp_path, monkeypatch):
+    """Never write an ssh entry that still carries <YOUR_VPS> into a client."""
+    _home(tmp_path, monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("VPS_HOST", raising=False)
+    rep = run_setup(backend="router", json_out=True, write_clients=["cursor"])
+    assert rep["ok"] is False and "not deployed" in rep["clients_failed"][0]["error"]
+    assert not (tmp_path / ".cursor" / "mcp.json").exists()
+
+
+def test_cli_write_client_alias_json(tmp_path, monkeypatch, capsys):
+    _home(tmp_path, monkeypatch)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    rc = main(["setup", "--backend", "direct", "--keys", K1, "--offline",
+               "--write-client", "claude", "--json"])
+    rep = json.loads(capsys.readouterr().out)
+    assert rc == 0 and rep["ok"]
+    assert rep["clients_written"][0]["client"] == "claude_desktop"   # alias resolved
+    assert (tmp_path / "Library" / "Application Support" / "Claude"
+            / "claude_desktop_config.json").exists()
+    os.environ.pop("GEMINI_API_KEYS", None)
+
+
+def test_render_steps_numbered_no_duplicate(tmp_path, monkeypatch):
+    import io
+
+    from rich.console import Console
+
+    from gemini_mcp.setup_wizard import render_report
+    _home(tmp_path, monkeypatch)
+    rep = run_setup(backend="direct", keys=K1, probe=False, json_out=True)
+    buf = io.StringIO()
+    render_report(rep, Console(file=buf, force_terminal=False, width=120))
+    txt = buf.getvalue()
+    assert "Do this now:" in txt
+    for n in ("1.", "2.", "3."):
+        assert n in txt
+    assert "quota_status" in txt                       # verify prompt is shown
+    assert txt.count("into your MCP client config") == 1   # said exactly once

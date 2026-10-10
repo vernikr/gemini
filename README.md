@@ -20,28 +20,47 @@ a compact consolidated result — the agent's own context stays clean.
   `backend: auto` picks router only when persistent state exists; env
   `GEMINI_MCP_BACKEND` overrides. See [`docs/08-dual-mode.md`](docs/08-dual-mode.md).
 
-## Quickstart — no server (direct mode)
+## Quick start
+
+### If you're human
 
 ```bash
-uvx --from gemini-mcp-gateway gemini-mcp setup
-# wizard: fleet-vs-simple question → masked key paste (aistudio.google.com/app/apikey)
-# → ~/.config/gemini-mcp/{config.yaml,.env 0600} → live listModels probe → client snippet
+pnpm dlx @vernikr/gemini-mcp setup     # or: uvx --from gemini-mcp-gateway gemini-mcp setup
 ```
 
-Paste the printed snippet into your MCP client — for Freebuff/Claude Desktop/Cursor
-(`~/.agents/mcp.json`, `claude_desktop_config.json`, `~/.cursor/mcp.json`) it is:
+Answer the questions: **1 Simple** (direct to Google AI Studio, keys via hidden
+paste/file/skip) or **2 Fleet** (your VPS — the wizard clones the repos, provisions
+the server, pushes keys, health-checks, all you answer is host + projects folder).
+It finishes with a numbered checklist: paste one JSON block into your MCP client
+(Freebuff/Claude Desktop/Cursor — or add `--write-client freebuff|claude|cursor`
+and it merges the block in for you, with a `.bak` backup), restart the client,
+send the agent the printed verify prompt. `gemini-mcp doctor` re-checks
+keys/chain/limits; `gemini-mcp uninstall --yes` removes everything the wizard wrote.
+Full client matrix + fleet JSON forms: [`docs/06-consumer.md`](docs/06-consumer.md).
 
-```json
-{ "mcpServers": { "gemini": {
-    "command": "npx", "args": ["-y", "@vernikr/gemini-mcp", "stdio"] } } }
+### If you're an AI agent
+
+One shot, no TTY, machine-readable. Exit `0` + `"ok": true` = done; otherwise every
+failure carries `error`/`deploy_error`/`clients_failed[].fix` naming the exact remedy —
+apply it, re-run the same command (idempotent). Relay to the human only the two manual
+actions: restart the MCP client, then send the agent the prompt from `verify_prompt`
+(tool `quota_status`, MCP server `gemini`).
+
+```bash
+# direct (no server); keys from a file — never from shell history
+npx -y @vernikr/gemini-mcp setup --backend direct \
+  --keys-file /abs/path/keys.txt --write-client freebuff --json
+
+# fleet (shared-quota server); clones/provisions/health-checks by itself
+npx -y @vernikr/gemini-mcp setup --backend router --vps-host <ip> \
+  [--vps-user root] [--projects-dir ~/projects] [--keys-file /abs/path/keys.txt] \
+  --write-client freebuff --json
 ```
 
-— then ask the agent to call `quota_status`. No env vars needed: the gateway
-auto-discovers `~/.config/gemini-mcp/`. Full client matrix + fleet JSON forms:
-[`docs/06-consumer.md`](docs/06-consumer.md). Manual alternative:
-`export GEMINI_API_KEYS="AIza…,AIza…"` + `uvx --from gemini-mcp-gateway gemini-mcp
-stdio`. `gemini-mcp doctor` re-checks keys/chain/limits; `gemini-mcp uninstall --yes`
-removes everything the wizard wrote.
+Fleet prerequisites (each failure message tells you how to check): GitHub auth for
+the private repos (`git ls-remote https://github.com/vernikr/gemini-mcp`), passwordless
+`ssh <user>@<ip>`, bash+rsync, macOS/Linux. No env vars needed afterwards: the gateway
+auto-discovers `~/.config/gemini-mcp/`.
 
 Direct mode needs nothing but API keys. Usage is tracked in a LOCAL persistent ledger
 (`~/.config/gemini-mcp/state.db`): quota counters survive restarts and are shared by all

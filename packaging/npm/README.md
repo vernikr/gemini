@@ -11,6 +11,46 @@ massive-body chunked analysis with consolidation. Python core `gemini-mcp-gatewa
 <https://aistudio.google.com/app/apikey> — several keys = several times the quota
 (20 requests/day per key×model).
 
+## Quick start
+
+### If you're human
+
+```bash
+pnpm dlx @vernikr/gemini-mcp setup
+```
+
+Answer the questions (pick **1 Simple** unless you run a server; keys: hidden paste,
+a file, or skip). The wizard finishes with a short numbered checklist — paste one
+JSON block into your MCP client (or let it write that for you: add
+`--write-client freebuff|claude|cursor`), restart the client, send your agent the
+printed verify prompt. Fleet (pick **2**): it also deploys your VPS end-to-end
+(clone → provision → keys → healthcheck) and prints the final block with your real
+host already inside.
+
+### If you're an AI agent
+
+One shot, no TTY, machine-readable. Exit code `0` + `"ok": true` = done; otherwise
+every failure carries `error`/`deploy_error`/`clients_failed[].fix` naming the exact
+remedy — apply it and re-run the same command (idempotent).
+
+```bash
+# direct (no server); keys from a file — never from shell history
+npx -y @vernikr/gemini-mcp setup --backend direct \
+  --keys-file /abs/path/keys.txt --write-client freebuff --json
+
+# fleet (shared-quota server); clones/provisions/health-checks by itself
+npx -y @vernikr/gemini-mcp setup --backend router --vps-host <ip> \
+  [--vps-user root] [--projects-dir ~/projects] [--keys-file /abs/path/keys.txt] \
+  --write-client freebuff --json
+```
+
+Fleet prerequisites you must verify first (each failure message tells you how):
+`git ls-remote https://github.com/vernikr/gemini-mcp` succeeds (private repos —
+GitHub auth), `ssh <user>@<ip> 'echo ok'` succeeds (key auth), bash+rsync present,
+macOS/Linux. What is left for the human — relay exactly these two manual actions
+from the JSON: **restart the MCP client fully**, then **send the agent the prompt in
+`verify_prompt`** (tool `quota_status`, MCP server `gemini`).
+
 ## Wiring — 2 options
 
 ### A · Wizard (recommended): `setup`, then paste one JSON block
