@@ -53,6 +53,16 @@ jobs:
       - name: Lockstep guard — package.json version must equal the tag
         working-directory: packaging/npm
         run: test "$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME#v}"
+      # npm answers a scoped PUT it refuses with 404, which reads like "no such
+      # package". Say which of the two it is before the publish, or the next failure
+      # costs another round trip.
+      - name: Diagnose npm access
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          test -n "$NODE_AUTH_TOKEN" || { echo "::error::NPM_TOKEN secret is empty"; exit 1; }
+          npm whoami || echo "::warning::npm whoami failed — the token is rejected"
+          npm access ls-packages || echo "::warning::the token lists no packages — it lacks read rights"
       - name: Publish shim
         working-directory: packaging/npm
         # no --provenance: sigstore attestation requires a PUBLIC source repo (E422);
