@@ -28,9 +28,17 @@ uvx --from gemini-mcp-gateway gemini-mcp setup
 # → ~/.config/gemini-mcp/{config.yaml,.env 0600} → live listModels probe → client snippet
 ```
 
-Paste the printed snippet into your MCP client (Freebuff `~/.agents/mcp.json`, Claude
-Desktop, Cursor — any stdio client) and ask the agent to call `quota_status`. No env
-vars needed: the gateway auto-discovers `~/.config/gemini-mcp/`. Manual alternative:
+Paste the printed snippet into your MCP client — for Freebuff/Claude Desktop/Cursor
+(`~/.agents/mcp.json`, `claude_desktop_config.json`, `~/.cursor/mcp.json`) it is:
+
+```json
+{ "mcpServers": { "gemini": {
+    "command": "npx", "args": ["-y", "@vernikr/gemini-mcp", "stdio"] } } }
+```
+
+— then ask the agent to call `quota_status`. No env vars needed: the gateway
+auto-discovers `~/.config/gemini-mcp/`. Full client matrix + fleet JSON forms:
+[`docs/06-consumer.md`](docs/06-consumer.md). Manual alternative:
 `export GEMINI_API_KEYS="AIza…,AIza…"` + `uvx --from gemini-mcp-gateway gemini-mcp
 stdio`. `gemini-mcp doctor` re-checks keys/chain/limits; `gemini-mcp uninstall --yes`
 removes everything the wizard wrote.
@@ -68,6 +76,8 @@ GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor
 | 2 · Functional/business requirements | [`docs/02-requirements.md`](docs/02-requirements.md) |
 | 3 · Architecture & stack | [`docs/03-architecture.md`](docs/03-architecture.md) |
 | 4 · Plan (M0–M6) | [`docs/04-plan.md`](docs/04-plan.md) |
+| Consumer guide (client JSON, direct mode) | [`docs/06-consumer.md`](docs/06-consumer.md) |
+| Dual-mode backend design | [`docs/08-dual-mode.md`](docs/08-dual-mode.md) |
 | Risks | [`docs/blockers/`](docs/blockers/) |
 
 ## Planned usage (Freebuff, `~/.agents/mcp.json`)
