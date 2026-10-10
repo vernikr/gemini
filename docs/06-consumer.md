@@ -179,6 +179,14 @@ shot), `analyze_file` (upload ticket + server-side RTF/DOCX extraction),
 answer starts with a one-line `report` (`backend=direct · route=… · model=… · req=N ·
 …s · clean run`) — the agent should relay it.
 
+File flow (for the agent — also returned by `quota_status` in the `file_flow` field):
+1) `file_upload_ticket(filename, size_bytes)` → 2) HTTP PUT the raw bytes to
+`upload_url` → 3) `analyze_file(upload_id, task)`. The server extracts clean text
+(pandoc), chunks if needed and spends quota atomically. Pasting raw file contents into
+`gemini_generate`/`analyze_large` is rejected (`raw_document_inlined`): markup like RTF
+is unreadable for the model (non-ASCII text survives as hex escapes) — guardrail added
+in 0.12.0 after a real agent failure.
+
 Terminal (no client needed):
 
 ```bash

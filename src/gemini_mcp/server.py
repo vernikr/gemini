@@ -92,6 +92,8 @@ def build_server(deps: Deps) -> MCPServer:
         """Analyze a massive text body with Gemini without polluting your context.
         ALWAYS relay the response's 'report' field (route · thinking · model · spend
         · rough edges) to the user in chat.
+        Raw document payloads (RTF/PDF/DOCX markers) in 'body' are REJECTED —
+        for files use file_upload_ticket + analyze_file instead.
 
         The server measures the body, and if it exceeds the input budget it splits it
         into overlapping chunks (each sent with a 'CHUNK N/M' service note), analyzes
@@ -162,6 +164,8 @@ def build_server(deps: Deps) -> MCPServer:
     ) -> dict:
         """Single-shot quota-aware Gemini completion (payload fits the limits).
         ALWAYS relay the response's 'report' field to the user in chat.
+        Raw document payloads (RTF/PDF/DOCX markers) in 'prompt' are REJECTED —
+        for files use file_upload_ticket + analyze_file instead.
 
         Same routing profiles ('route': 'optimal' default / 'best_available'),
         thinking_level (default medium), wait policy, overflow semantics and async

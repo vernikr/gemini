@@ -123,8 +123,40 @@ def _fail(deps: Deps, emitter: ProgressEmitter, tool: str, request_id: str | Non
     return ToolError(json.dumps(payload, ensure_ascii=False, default=str))
 
 
+_DOC_MARKERS = (("{\\rtf1", "RTF"), ("%PDF-", "PDF"), ("PK\x03\x04", "DOCX/XLSX (zip)"))
+
+
+def _inline_doc_guard(text: str | None, field: str) -> None:
+    """Fail fast when an agent inlines a raw document into a text tool.
+
+    Observed in the wild (Solar Pro 4, 2026-10-10): instead of the M4.5 ingest
+    flow the agent pasted an 840 KB RTF into the prompt — unreadable for the
+    model (Cyrillic survives as \\'hex escapes) and a context bomb for the
+    client. Detect the format markers and answer with the exact alternative.
+    """
+    if not text:
+        return
+    for marker, kind in _DOC_MARKERS:
+        if marker in text:
+            raise ToolError(json.dumps({
+                "error": "raw_document_inlined",
+                "detected": kind,
+                "field": field,
+                "fix": (f"Do not paste raw file contents into '{field}' — {kind} "
+                        "markup is unreadable for the model (non-ASCII text is "
+                        "hex-escaped) and burns your context. Use the file flow: "
+                        "1) file_upload_ticket(filename, size_bytes) "
+                        "2) HTTP PUT the file bytes to the returned upload_url "
+                        "3) analyze_file(upload_id, task). Extraction (pandoc), "
+                        "chunking and quota accounting happen server-side. If you "
+                        "genuinely meant to analyze markup AS text, escape or "
+                        "re-encode it first."),
+            }, ensure_ascii=False))
+
+
 async def analyze_large_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
     p = AnalyzeParams(**params)
+    _inline_doc_guard(p.body, "body")
     router, p.overflow, p.route = _apply_route(deps, p.route, p.overflow)
     pipeline = Pipeline(router, deps.app_cfg, emitter, deps.logger)
     try:
@@ -148,6 +180,7 @@ async def analyze_large_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
 
 
 async def gemini_generate_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
+    _inline_doc_guard(params.get("prompt"), "prompt")
     router, ovf, route = _apply_route(deps, params.get("route"), params.get("overflow"))
     await emitter.stage("received", 3,
                         f"single-shot: {len(params['prompt'])} chars, route={route}")
@@ -274,6 +307,13 @@ async def quota_status_tool(deps: Deps) -> dict:
                 "and reset_eta_pt"),
         "reset_eta_pt": iso(pt_midnight_ts(deps.router.cfg.quota_day_tz, days_ahead=1)),
         "backend": deps.backend, "counters": counters,
+        # Hint rides in the PAYLOAD: Freebuff truncates tool descriptions, but
+        # agents reliably call quota_status first and read what comes back.
+        "file_flow": ("To analyze a file (RTF/DOCX/PDF/txt): file_upload_ticket"
+                      "(filename, size_bytes) → HTTP PUT the bytes to upload_url → "
+                      "analyze_file(upload_id, task). NEVER inline raw file contents "
+                      "into gemini_generate/analyze_large — raw document markup is "
+                      "rejected (unreadable for the model); extraction is server-side."),
     }
 
 

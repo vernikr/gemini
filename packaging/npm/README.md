@@ -51,6 +51,12 @@ macOS/Linux. What is left for the human — relay exactly these two manual actio
 from the JSON: **restart the MCP client fully**, then **send the agent the prompt in
 `verify_prompt`** (tool `quota_status`, MCP server `gemini`).
 
+Analyzing a FILE (agent): never read it yourself and never inline its contents into a
+prompt. Call `file_upload_ticket(filename, size_bytes)` → HTTP PUT the raw bytes to
+`upload_url` → `analyze_file(upload_id, task)`. Extraction (pandoc), chunking and quota
+are server-side; `quota_status` repeats this recipe in its `file_flow` field, and raw
+RTF/PDF/DOCX payloads in text tools fail fast with a `raw_document_inlined` fix.
+
 ## Wiring — 2 options
 
 ### A · Wizard (recommended): `setup`, then paste one JSON block
@@ -69,8 +75,9 @@ What it does — and what it does NOT:
   side itself — clone/update repos, provision, push keys, healthcheck — and ends with
   the same paste-once JSON (`--vps-host`, `--vps-user`, `--projects-dir` skip prompts);
 - probes keys live (listModels — zero quota spent) and prints fingerprints, never keys;
-- **prints** the ready `mcpServers` JSON for your client — it does **not** edit any
-  client config itself (formats differ per client; you paste the block once).
+- **prints** the ready `mcpServers` JSON for your client — paste it once, or pass
+  `--write-client freebuff|claude_desktop|cursor` and the wizard merges the `gemini`
+  entry into the client's config file itself (`.bak` backup kept).
 
 After the wizard the client JSON needs no env/keys — the gateway auto-discovers
 `~/.config/gemini-mcp/`:

@@ -53,6 +53,30 @@ async def test_gemini_generate_tool():
     assert deps.audit.entries[0]["tool"] == "gemini_generate"
 
 
+async def test_inline_raw_document_rejected_with_fix():
+    """Solar-Pro-4-class failure (2026-10-10): raw RTF inlined into a text tool."""
+    deps = make_deps()
+    rtf = "Here is the file:\n{\\rtf1\\ansi\\ansicpg1251 {\\par garbage}}"
+    with pytest.raises(ToolError) as ei:
+        await gemini_generate_tool(deps, ProgressEmitter(FakeCtx()), {"prompt": rtf})
+    payload = json.loads(str(ei.value))
+    assert payload["error"] == "raw_document_inlined" and payload["detected"] == "RTF"
+    assert "file_upload_ticket" in payload["fix"] and "analyze_file" in payload["fix"]
+    with pytest.raises(ToolError) as ei:
+        await analyze_large_tool(deps, ProgressEmitter(FakeCtx()),
+                                 {"task": "t", "body": "%PDF-1.7 raw bytes"})
+    assert json.loads(str(ei.value))["detected"] == "PDF"
+    # guard fires before any routing/quota work: nothing spent, nothing audited
+    assert not deps.audit.entries
+
+
+async def test_quota_status_carries_file_flow_hint(tmp_path):
+    router = Router(real_router_cfg(tmp_path))
+    deps = make_deps(router=router, app_cfg=make_app_cfg(tmp_path / "logs"))
+    q = await quota_status_tool(deps)
+    assert "file_upload_ticket" in q["file_flow"] and "analyze_file" in q["file_flow"]
+
+
 async def test_quota_status_and_logs_with_real_router(tmp_path):
     router = Router(real_router_cfg(tmp_path))
     deps = make_deps(router=router, app_cfg=make_app_cfg(tmp_path / "logs"))
