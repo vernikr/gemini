@@ -41,8 +41,8 @@ After the wizard the client JSON needs no env/keys — the gateway auto-discover
 
 ### B · JSON-only (skip the wizard entirely)
 
-Is pasting JSON into `mcp.json` enough? **Yes — if the keys travel in its `env`**
-(without keys anywhere the gateway fails fast by design):
+Is pasting JSON into `mcp.json` enough? **Yes — if the keys travel with it** (without
+keys anywhere the gateway fails fast by design). Inline in `env`:
 
 ```json
 {
@@ -55,6 +55,17 @@ Is pasting JSON into `mcp.json` enough? **Yes — if the keys travel in its `env
   }
 }
 ```
+
+…or — more private, secrets stay out of the client config — point at a keys **file**
+(comma/whitespace/newline separated, `#` comments ok):
+
+```json
+{ "env": { "GEMINI_MCP_KEYS_FILE": "/absolute/path/keys.txt" } }
+```
+
+Key sources, priority high → low: `--keys` / `--keys-file` CLI flags (any command,
+before the subcommand) → `GEMINI_MCP_KEYS_FILE` → `router.keys_file` in config.yaml →
+`GEMINI_API_KEYS` env (this is what the wizard's `.env` provides).
 
 Backend auto-resolves to `direct`; logs and the local usage ledger (`state.db` —
 quota counters survive restarts) go to `~/.config/gemini-mcp/`. Trade-off vs option A:

@@ -37,6 +37,21 @@ per client; auto-write is planned as M7.5). Two wiring forms:
   "AIza…key1,AIza…key2"}` to the server entry — that alone is sufficient; backend
   auto-resolves to `direct`, logs+ledger still land in `~/.config/gemini-mcp/`
   (bare-launch default). Trade-off: keys sit in the client config file, not a 0600 .env.
+  More private JSON-only form — point at a keys FILE instead of inlining secrets:
+  `"env": {"GEMINI_MCP_KEYS_FILE": "/absolute/path/keys.txt"}`.
+
+### Key sources (priority high → low)
+
+| Source | Example |
+|---|---|
+| CLI argument | `gemini-mcp --keys 'AIza…' stdio` — visible in `ps`/history, last resort |
+| CLI file | `gemini-mcp --keys-file ~/keys.txt stdio` |
+| env → file | `GEMINI_MCP_KEYS_FILE=/abs/path/keys.txt` (client-JSON `env` friendly) |
+| config.yaml | `router:` → `keys_file: ~/keys.txt` |
+| env inline | `GEMINI_API_KEYS=AIza…,AIza…` (`setup`'s `.env`, or client-JSON `env`) |
+
+Keys-file format: comma/whitespace/newline separated, `#` comments ignored, deduped.
+`setup` also accepts `--keys-file` (merged with `--keys`).
 
 The gateway auto-discovers `~/.config/gemini-mcp/` — **no other env vars needed**.
 

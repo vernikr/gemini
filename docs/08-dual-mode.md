@@ -58,8 +58,11 @@ make_routers(): → (router, router_optimal, mode); direct mode points BOTH inst
 ## Keys & config
 
 Direct mode reads keys through the existing `RouterConfig.load()` plumbing:
-`GEMINI_API_KEYS` / `GEMINI_API_KEY_1..10` env (wizard will write them to
-`~/.config/gemini-mcp/.env`). No new key config surface — deliberate.
+`GEMINI_API_KEYS` / `GEMINI_API_KEY_1..10` env (wizard writes them to
+`~/.config/gemini-mcp/.env`). Since 0.9.0 also: `--keys` / `--keys-file` global CLI
+flags, `GEMINI_MCP_KEYS_FILE` env, and `router.keys_file` in config.yaml (precedence
+in that order, file format: comma/whitespace/newline + `#` comments) — see
+docs/06-consumer.md. No other new key surface — deliberate.
 
 ## Tests
 

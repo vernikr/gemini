@@ -244,8 +244,17 @@ def _bootstrap_env() -> None:
 
 
 def _run_setup(args) -> int:
+    from .config import parse_keys
     from .setup_wizard import render_report, run_setup
-    rep = run_setup(backend=args.backend, keys=args.keys, probe=not args.offline,
+    keys = args.keys
+    if args.keys_file:
+        kfp = Path(args.keys_file).expanduser()
+        if not kfp.is_file():
+            console.print(f"[red]keys file not found:[/red] {kfp}")
+            return 2
+        merged = parse_keys(keys or "") + parse_keys(kfp.read_text(encoding="utf-8"))
+        keys = ",".join(dict.fromkeys(merged)) or None
+    rep = run_setup(backend=args.backend, keys=keys, probe=not args.offline,
                     force=args.force, json_out=args.json, console=console)
     if args.json:
         print(json.dumps(rep, indent=1, ensure_ascii=False, default=str))
@@ -269,6 +278,10 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="gemini-mcp",
                                  description="Gemini free-tier MCP gateway")
     ap.add_argument("--config", help="config.yaml path (or GEMINI_MCP_CONFIG)")
+    ap.add_argument("--keys", help="API key(s), comma-separated (overrides every other "
+                                   "source; visible in ps/history — prefer --keys-file)")
+    ap.add_argument("--keys-file", help="file with key(s): comma/whitespace/newline "
+                                        "separated, # comments ok (or GEMINI_MCP_KEYS_FILE)")
     ap.add_argument("--version", action="version", version=f"gemini-mcp {__version__}")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
@@ -277,6 +290,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--backend", choices=["direct", "router"],
                    help="skip the fleet-vs-simple question")
     p.add_argument("--keys", help="AI Studio keys, comma-separated (non-interactive)")
+    p.add_argument("--keys-file", help="read keys from a file (comma/whitespace/newline "
+                                       "separated, # comments ok)")
     p.add_argument("--offline", action="store_true", help="skip the live key probe")
     p.add_argument("--force", action="store_true", help="overwrite existing keys/config")
     p.add_argument("--json", action="store_true")
@@ -309,7 +324,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.cmd in ("setup", "uninstall"):       # works even with a broken/absent config
         return _run_setup(args) if args.cmd == "setup" else _run_uninstall(args)
     try:
-        app_cfg, router_cfg = load_all(args.config)
+        from .config import parse_keys
+        over: dict = {}
+        arg_keys: list[str] = parse_keys(args.keys or "")
+        if args.keys_file:
+            kfp = Path(args.keys_file).expanduser()
+            if not kfp.is_file():
+                console.print(f"[red]keys file not found:[/red] {kfp}")
+                return 2
+            arg_keys += parse_keys(kfp.read_text(encoding="utf-8"))
+        if arg_keys:
+            over["api_keys"] = list(dict.fromkeys(arg_keys))
+        app_cfg, router_cfg = load_all(args.config, **over)
     except Exception as e:  # noqa: BLE001 — config errors must be readable
         console.print(f"[red]config error:[/red] {e}")
         return 2

@@ -75,6 +75,16 @@ class AppCfg(BaseModel):
     backend_resolved: str = ""               # filled at startup; shown in healthz/meta
 
 
+def parse_keys(text: str) -> list[str]:
+    """Keys from a file/argument: comma- and/or whitespace-separated, `#` comments
+    allowed, order preserved, deduped. Gemini keys are [A-Za-z0-9_-] so no quoting."""
+    out: list[str] = []
+    for line in text.splitlines():
+        line = line.split("#", 1)[0]
+        out += [t for t in line.replace(",", " ").split() if t]
+    return list(dict.fromkeys(out))
+
+
 def config_home() -> Path:
     """Wizard-managed config dir: $GEMINI_MCP_HOME or ~/.config/gemini-mcp (XDG-ish,
     same on macOS/Linux). setup writes config.yaml + .env (0600) here."""
@@ -100,6 +110,19 @@ def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConf
         # clients spawn with cwd=$HOME — so keep rotating logs out of ./logs (~/logs)
         # and beside the state.db that direct mode already puts in the config home
         app.logging.dir = str(config_home() / "logs")
+    router_raw = dict(raw.get("router", {}))
+    # Key sources (highest wins): explicit over['api_keys'] (CLI --keys/--keys-file)
+    # → keys file (router.keys_file in config.yaml / GEMINI_MCP_KEYS_FILE env)
+    # → router.api_keys in config.yaml → GEMINI_API_KEYS[_1..10] env (.env bootstrap)
+    kf = router_raw.pop("keys_file", None) or os.environ.get("GEMINI_MCP_KEYS_FILE")
+    if kf:
+        kfp = Path(str(kf)).expanduser()
+        if not kfp.is_file():
+            raise FileNotFoundError(f"keys file not found: {kfp}")
+        fkeys = parse_keys(kfp.read_text(encoding="utf-8"))
+        if fkeys:
+            router_raw["api_keys"] = fkeys
     router_cfg = RouterConfig.load(os.environ.get("GEMINI_ROUTER_CONFIG"),
-                                   **raw.get("router", {}))
+                                   **{**router_raw,
+                                      **{k: v for k, v in over.items() if v is not None}})
     return app, router_cfg
