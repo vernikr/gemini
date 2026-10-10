@@ -615,3 +615,17 @@ chunking pipeline, so the only limit that matters is local RAM — which is exac
 §8 measured. Adopting the Files API would be a way to send *binary* payloads (PDF,
 images, audio) to the model directly; it would not raise the ceiling on text analysis,
 because text analysis is not payload-bound.
+
+### The VPS still needs one command
+
+The new default is in the package, but the VPS does not read the package for this: it
+reads `/opt/apps/gemini-mcp/config.yaml`, which push-CD never touches (the CD path
+reinstalls the tool binary only). That file still carries `max_file_mb: 50`, so the
+production service is still running the unreachable cap until the config is synced:
+
+```bash
+bash scripts/run_remote.sh setup     # rsyncs config.yaml + re-provisions, idempotent
+```
+
+The sandbox has no SSH key for the VPS (`docs/blockers/b05`), so this one cannot be
+done from here.
