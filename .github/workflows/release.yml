@@ -27,7 +27,8 @@ jobs:
     runs-on: ubuntu-latest
     environment: pypi                     # matches the PyPI trusted-publisher config
     permissions:
-      id-token: write                     # OIDC handshake with PyPI
+      contents: read                     # job-level permissions REPLACE workflow-level:
+      id-token: write                    # OIDC handshake with PyPI needs both
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
