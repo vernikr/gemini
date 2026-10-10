@@ -501,3 +501,27 @@ of the duplicate, which is a stronger test than the one they replaced.
 `gemini-mcp` now requires `gemini-router>=0.1.3`: `enforce_audit_size` calls
 `Ledger.vacuum()`, and the previous floor (`>=0.1.1`) would have let a consumer resolve
 a router without it and hit `AttributeError` at prune time.
+
+### Full CI/CD
+
+`gemini-router` **0.1.3** — `ci` green on `main` and `v0.1.3`. The `release`
+workflow's `test` job is green but its `pypi` job fails with
+`invalid-publisher: valid token, but no corresponding publisher`, i.e. the one-time
+PyPI trusted-publisher setup that is still outstanding; 0.1.3 was published manually
+instead, as agreed.
+
+`gemini-mcp` **0.13.0** — `ci` green on `main`; tag `v0.13.0` → all five release jobs
+green: test 13 s, pypi 23 s, npm 8 s, deploy 49 s, smoke 72 s.
+
+Deploy: `previous=0.12.1` → two registry-lag retries → `OK: healthy, on 0.13.0`.
+Smoke: both the PyPI and the npm probe reported `gemini-mcp 0.13.0` after one retry
+each. Registry lag on the first attempt is now consistent across every release and is
+handled by the existing retries, not a defect.
+
+Registries: PyPI `gemini-mcp-gateway 0.13.0`, `gemini-router 0.1.3`,
+npm `@vernikr/gemini-mcp 0.13.0`. The published wheel declares
+`gemini-router<0.2,>=0.1.3`.
+
+Clean consumer install from public registries: `gemini-mcp-gateway==0.13.0` resolves
+`gemini-router 0.1.3` on its own, `Ledger.vacuum` is present, `--version` reports
+0.13.0, `doctor --offline` runs clean.
