@@ -779,3 +779,29 @@ first make the library pleasant to embed (a documented sync facade and a stable
 "point at the shared ledger" recipe — `external-consumer` is the proof it works), then point
 the desktop app at the existing HTTP endpoint, and only then consider a dedicated
 bridge if a concrete consumer demands one.
+
+### Wave 3 released
+
+The GitHub PAT from §10's blocker was replaced by the owner; the old one had been found
+and revoked by GitHub's secret scanning, which is why it died mid-session rather than
+expiring.
+
+- `gemini-router` **0.1.4** — `main` + `v0.1.4` pushed, `ci` green on both. **Not on
+  PyPI**: the PyPI token in the same exposed file was revoked too (403 on upload), and
+  the router has no trusted publisher configured. The tag push itself failed once with
+  GitHub's `fatal error in commit_refs` and succeeded on the immediate retry.
+- `gemini-mcp` **0.14.1** — all five release jobs green (test 13 s, pypi 32 s, npm 8 s,
+  deploy 47 s, smoke 228 s); deploy log `OK: healthy, on 0.14.1`. Both PyPI and npm
+  report 0.14.1. It stays on `gemini-router>=0.1.3` because 0.1.4 is not published —
+  the two waves are independent, the chunker work needs nothing from the router.
+
+Verified live on the VPS over SSH: unit `active`, `healthz` reports 0.14.1, the
+effective `max_file_mb` is **20**, `allow_oversize` is gone from the model, and
+`MemoryMax=367001600` (350 MiB). The stale `max_file_mb: 50` in the server's own
+`config.yaml` was corrected in place, with a backup in `/root/bak/` — push-CD replaces
+the package but never touches that file, so a default change does not reach a deployed
+server on its own. Worth remembering: it is the one part of the config that rsync owns.
+
+The router reaching PyPI needs either a fresh token or the one-time trusted-publisher
+setup that has been deferred; the second removes the dependency on a token entirely,
+which this incident is a good argument for.
