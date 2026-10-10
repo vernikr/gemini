@@ -86,6 +86,54 @@ def _client_snippets(backend: str, fleet: dict | None = None,
                 "restart the client"]}
 
 
+def _short_path(p: str | Path) -> str:
+    """'~/projects' → '~/projects' — prompt defaults read as paths, not noise."""
+    s = str(Path(p).expanduser())
+    home = str(Path.home())
+    return "~" + s[len(home):] if s == home or s.startswith(home + os.sep) else s
+
+
+def _ask_keys(console, *, purpose: str, default: str) -> str | None:
+    """Key intake as ONE visible 3-way choice. Hidden paste is guarded: toggling
+    tty echo has crashed macOS Terminal.app 2.14 (SIGSEGV, 2026-10-10) — if the
+    terminal can't do hidden input we degrade to the file option, never traceback."""
+    from rich.prompt import Prompt
+    if console:
+        console.print(f"Get Gemini API keys for {purpose}:")
+        console.print("  1) paste now (hidden input)  ·  2) read from a file  ·  "
+                      "3) skip")
+    choice = Prompt.ask("Keys", choices=["1", "2", "3"], default=default,
+                        console=console)
+    if choice == "1":
+        try:
+            val = getpass.getpass("keys (comma-separated, hidden): ").strip()
+            return val or None
+        except (Exception, KeyboardInterrupt) as e:  # noqa: BLE001 — tty may refuse
+            if console:
+                console.print(f"[yellow]hidden input failed ({type(e).__name__}) — "
+                              "some terminals crash on echo-off; re-run and pick "
+                              "2 (file), or pass --keys/--keys-file[/yellow]")
+            return None
+    if choice == "2":
+        from .config import parse_keys
+        for _ in range(3):
+            p = Prompt.ask("Path to keys file (comma/whitespace/newline separated, "
+                           "# comments ok; empty = skip)", default="", console=console)
+            if not p.strip():
+                return None
+            fp = Path(p.strip()).expanduser()
+            if not fp.is_file():
+                if console:
+                    console.print(f"[red]not a file:[/red] {fp}")
+                continue
+            ks = parse_keys(fp.read_text(encoding="utf-8"))
+            if ks:
+                return ",".join(ks)
+            if console:
+                console.print("[yellow]no keys found in that file[/yellow]")
+    return None
+
+
 def _ver_tuple(v: str) -> tuple[int, ...]:
     parts = []
     for p in str(v).split(".")[:3]:
@@ -241,7 +289,7 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
                     "created": [], "kept": [], "overwritten": [], "key_ids": []}
     fleet: dict = {}
     if backend == "router":
-        from rich.prompt import Confirm, Prompt
+        from rich.prompt import Prompt
         tty = sys.stdin.isatty() and not json_out
         fleet = {"host": vps_host or os.environ.get("VPS_HOST") or "",
                  "user": vps_user or os.environ.get("VPS_USER") or "root",
@@ -253,13 +301,14 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
                                        console=console)
             fleet["user"] = Prompt.ask("SSH user on that server",
                                        default=fleet["user"], console=console)
-            fleet["projects_dir"] = Prompt.ask(
+            fleet["projects_dir"] = str(Path(Prompt.ask(
                 "Projects folder (repos are cloned/updated there, nothing is "
-                "downloaded twice)", default=fleet["projects_dir"], console=console)
-        if tty and keys is None and Confirm.ask(
-                "Paste Gemini API keys for the SERVER now? (No = keep the keys "
-                "already on it)", default=False, console=console):
-            keys = getpass.getpass("keys (comma-separated, hidden): ")
+                "downloaded twice; ~ ok)",
+                default=_short_path(fleet["projects_dir"]),
+                console=console)).expanduser())
+        if tty and keys is None:
+            keys = _ask_keys(console, purpose="the SERVER (it keeps them; this "
+                                              "machine stores none)", default="3")
         if keys:
             fleet["key_ids"] = [key_id(k.strip()) for k in keys.split(",") if k.strip()]
         report["fleet"] = fleet
@@ -270,9 +319,8 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
         return report
     if keys is None and not json_out and backend == "direct":
         if console:
-            console.print("Paste your Google AI Studio API key(s), comma-separated "
-                          "(input hidden; free tier: aistudio.google.com/app/apikey)")
-        keys = getpass.getpass("keys: ")
+            console.print("[dim]free-tier keys: aistudio.google.com/app/apikey[/dim]")
+        keys = _ask_keys(console, purpose="this machine (direct mode)", default="1")
 
     home.mkdir(parents=True, exist_ok=True)
     env_path, cfg_path = home / ".env", home / "config.yaml"

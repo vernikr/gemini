@@ -13,8 +13,10 @@ npx -y @vernikr/gemini-mcp setup        # npm/npx equivalent
 uvx --from gemini-mcp-gateway gemini-mcp setup   # pure Python toolchain
 ```
 
-The wizard: fleet-vs-simple question (pick **1 Simple**) → masked key paste
-(get keys free at https://aistudio.google.com/app/apikey, several keys = several times
+The wizard: fleet-vs-simple question (pick **1 Simple**) → key intake — masked paste,
+read from a file, or skip (0.10.1: the hidden-paste path is guarded because toggling
+tty echo crashed macOS Terminal.app 2.14; the file option never touches tty modes.
+Get keys free at https://aistudio.google.com/app/apikey, several keys = several times
 the quota) → live listModels probe → writes `~/.config/gemini-mcp/`:
 
 | File | Contents |

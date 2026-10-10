@@ -296,3 +296,35 @@ def test_bare_launch_without_keys_points_to_setup(tmp_path, monkeypatch, capsys)
     rc = main(["quota", "--json"])
     err = capsys.readouterr().err
     assert rc == 2 and "no API keys" in err and "gemini-mcp setup" in err
+
+
+def test_short_path_tilde(tmp_path, monkeypatch):
+    from gemini_mcp.setup_wizard import _short_path
+    monkeypatch.setenv("HOME", str(tmp_path))          # Path.home() follows HOME
+    assert _short_path(tmp_path / "projects") == "~/projects"
+    assert _short_path("/opt/other") == "/opt/other"
+
+
+def test_ask_keys_file_skip_and_crash_guard(tmp_path, monkeypatch):
+    """Key intake: file option needs NO tty echo toggle; hidden paste is guarded
+    (macOS Terminal.app 2.14 SIGSEGVs when a program turns echo off)."""
+    from gemini_mcp import setup_wizard as sw
+    kf = tmp_path / "keys.txt"
+    kf.write_text(f"# comment\n{K1}\n{K2}\n")
+
+    def feed(answers):
+        it = iter(answers)
+        monkeypatch.setattr("rich.prompt.Prompt.ask",
+                            staticmethod(lambda *a, **k: next(it)))
+
+    feed(["2", str(kf)])                               # file → parsed, deduped
+    assert sw._ask_keys(None, purpose="x", default="1") == f"{K1},{K2}"
+    feed(["3"])                                        # skip → None
+    assert sw._ask_keys(None, purpose="x", default="1") is None
+    feed(["2", str(tmp_path / "nope.txt"), ""])        # bad path → retry → empty=skip
+    assert sw._ask_keys(None, purpose="x", default="1") is None
+    feed(["1"])                                        # hidden paste crashes the tty
+    def boom(prompt):
+        raise OSError("tty died")
+    monkeypatch.setattr(sw.getpass, "getpass", boom)
+    assert sw._ask_keys(None, purpose="x", default="1") is None   # no traceback
