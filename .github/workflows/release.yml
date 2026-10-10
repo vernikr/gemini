@@ -36,9 +36,14 @@ jobs:
         run: grep -q "^version = \"${GITHUB_REF_NAME#v}\"$" pyproject.toml
       - run: rm -rf dist && uv build      # dist hygiene: never ship stale artifacts
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          skip-existing: true             # re-tag/re-run safe: files already on PyPI pass
   npm:
     needs: pypi                           # shim pins ==<version>: PyPI artifact first
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write                     # npm --provenance attestation (OIDC)
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
