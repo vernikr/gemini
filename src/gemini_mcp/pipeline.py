@@ -89,7 +89,10 @@ class Pipeline:
             text = res.text
             measured = res.tokens_in or 0
         else:
-            measured = await self.router.count_tokens(p.task + "\n\n" + body)
+            # The body alone: concatenating the task here would allocate a second
+            # full copy of a multi-megabyte document to measure it, and the request
+            # itself sends the task as `system`, not glued to the prompt.
+            measured = await self.router.count_tokens(body)
             await self.em.stage("measured", 5, f"measured: {measured} tokens total",
                                 tokens=measured)
             chunk_tokens = p.chunk_tokens or cfgp.chunk_size_tokens

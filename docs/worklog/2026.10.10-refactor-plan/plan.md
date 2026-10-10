@@ -629,3 +629,81 @@ bash scripts/run_remote.sh setup     # rsyncs config.yaml + re-provisions, idemp
 
 The sandbox has no SSH key for the VPS (`docs/blockers/b05`), so this one cannot be
 done from here.
+
+---
+
+## 10 · Wave 3 — implemented and verified, release blocked 2026-10-10
+
+Everything below is committed locally and green (router 50 tests, gateway 110 tests,
+ruff clean in both), but **not pushed and not published**: the GitHub PAT in the
+owner's AGENTS.md started returning HTTP 401 part-way through this wave, after it had
+already served the 0.14.0 release. See `docs/blockers/b06-github-pat-revoked.md`.
+Versions are therefore still 0.14.0 / 0.1.3 on disk; the bump, the lock update, the
+tags and the CD run are the only steps left, and they need a working token.
+
+Scope: the SQLite statement count on the budget path, and the memory the pipeline
+holds while chunking (the binding constraint on `max_file_mb`, per §8).
+
+### Budget queries: 360 → 3
+
+`Ledger.cooldown()` ran `DELETE FROM cooldowns WHERE until_ts<=?` inside a
+transaction on **every read**. It is called once per key×model pair on every budget
+check, so a sixty-pair table issued 60 BEGIN + 60 DELETE + 60 COMMIT to garbage-collect
+a table that `prune()` already cleans. Made it a pure read (`until_ts>?`); the
+arithmetic is unchanged and the 49 existing tests pass untouched.
+
+Then `quota_table()` and `model_budgets()` were rebuilt on a new
+`Ledger.gate_snapshot()`, which reads every pair's three gate inputs in three grouped
+queries instead of three queries per pair. The gate arithmetic was extracted into
+`gates_from()` and is shared by both paths, so there is still exactly one copy of it.
+
+| | before | after |
+|---|---|---|
+| `quota_table()` (60 rows) | 360 stmts / 3.7 ms | **3 stmts / 1.0 ms** |
+| `model_budgets()` (5 models) | 300 stmts / 2.4 ms | **3 stmts / 0.4 ms** |
+| whole 134-chunk job | ~26 000 stmts | **9 943 stmts** (8 137 SELECT) |
+
+The two paths run different SQL, so they can drift; a new test asserts the snapshot
+returns exactly what the per-pair accessors return, over 300 scattered rows mixing
+ok/error/quota statuses, `count` rows, and live plus expired cooldowns.
+
+The remaining SELECTs are the per-attempt routing decisions, which have to be fresh.
+Batching those would trade correctness for speed and was left alone.
+
+### Pipeline memory: 4× the document → about 1.7×
+
+`tracemalloc` put the pipeline's transient allocations at **4× the body size**. The
+dominant item was `chunker.segment()` returning a list: for a 25.7 MB document it
+retained **44.1 MB across 300 000 segment objects** — the per-object overhead exceeds
+the text. `split_text` then held that list and the finished chunks at the same time.
+
+`segment()` is now a generator and `split_text` keeps only the chunk under
+construction plus the overlap tail. Isolated: RSS above the body after `split_text`
+went **+52.8 MB → +5.0 MB**.
+
+Two smaller copies were removed on the way: `count_tokens(p.task + "\n\n" + body)`
+built a second full copy of the document to measure it — and the request itself sends
+the task as `system`, not glued to the prompt, so measuring the body alone is both
+cheaper and closer to what is actually billed. `PARA_RE`/`SENT_RE` switched from
+`findall` to `finditer` for the same reason.
+
+Honest note: those two did **not** move the peak. Measured, the peak was unchanged to
+within noise, because the copies were freed before the peak moment during chunking.
+They cut allocation churn and one inaccuracy; the generator is what moved the peak.
+
+### End-to-end peak, each size in its own process
+
+| Uploaded file | wave 2 | wave 3 | change |
+|---|---|---|---|
+| 10 MB | 130.5 MB | **127.5 MB** | −3.0 |
+| 20 MB | 223.0 MB | **171.4 MB** | −51.6 (−23 %) |
+| 30 MB | 333.9 MB | **214.4 MB** | −119.5 (−36 %) |
+| 40 MB | 472.5 MB | **257.5 MB** | −215.0 (−46 %) |
+
+Slope fell from ≈9.9 MB of RSS per uploaded MB to ≈4.6, so the 350 MB ceiling moves
+from ≈28 MB to ≈**60 MB**. A 40 MB file now fits with 92 MB to spare; before it was
+killed outright.
+
+The 20 MB default from §9 stays — it is the owner's decision, and it is now very
+conservative: 171 MB peak against a 350 MB ceiling, 178 MB of headroom. There is room
+to raise it later without touching the code.

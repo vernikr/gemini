@@ -5,56 +5,70 @@ from __future__ import annotations
 
 import math
 import re
+from collections.abc import Iterator
 
 PARA_RE = re.compile(r".+?(?:\n\s*\n|$)", re.S)
 SENT_RE = re.compile(r".+?(?:[.!?…]+(?:\s|$)|\n|$)", re.S)
 
 
-def segment(text: str, max_chars: int) -> list[str]:
-    """Split into units ≤ max_chars, preserving separators (lossless join)."""
-    segs: list[str] = []
-    for para in PARA_RE.findall(text):
+def segment(text: str, max_chars: int) -> Iterator[str]:
+    """Yield units ≤ max_chars, preserving separators (lossless join).
+
+    A generator, not a list. Materialising every segment of a multi-megabyte
+    document costs more than the document itself — hundreds of thousands of small
+    strings, each carrying its own object overhead — and the only caller consumes
+    them in order, once.
+    """
+    for para in (m.group(0) for m in PARA_RE.finditer(text)):
         if len(para) <= max_chars:
-            segs.append(para)
+            yield para
             continue
-        for sent in SENT_RE.findall(para):
+        for sent in (m.group(0) for m in SENT_RE.finditer(para)):
             if len(sent) <= max_chars:
-                segs.append(sent)
+                yield sent
                 continue
             for line in sent.splitlines(keepends=True):
                 if len(line) <= max_chars:
-                    segs.append(line)
+                    yield line
                     continue
                 for i in range(0, len(line), max_chars):
-                    segs.append(line[i:i + max_chars])
-    return segs
+                    yield line[i:i + max_chars]
 
 
 def split_text(body: str, max_chars: int, overlap_chars: int = 0,
                merge_tail_ratio: float = 0.05) -> list[str]:
+    """Cut into ≤ max_chars chunks, carrying a tail of at most overlap_chars into the
+    next one. Holds only the chunk under construction, never the whole segmentation."""
     if not body:
         return []
     max_chars = max(1, int(max_chars))
     overlap_chars = max(0, min(int(overlap_chars), max_chars // 2))
-    segs = segment(body, max_chars)
     chunks: list[str] = []
-    start = 0
-    while start < len(segs):
-        end, size = start, 0
-        while end < len(segs) and size + len(segs[end]) <= max_chars:
-            size += len(segs[end])
-            end += 1
-        chunks.append("".join(segs[start:end]))
-        if end >= len(segs):
-            break
-        if overlap_chars <= 0:
-            start = end
-            continue
-        o, acc = end, 0
-        while o > start and acc < overlap_chars:
-            o -= 1
-            acc += len(segs[o])
-        start = max(o, start + 1) if start + 1 < end else end   # guarantee progress
+    win: list[str] = []          # segments of the chunk being built
+    size = 0
+    for seg in segment(body, max_chars):
+        if win and size + len(seg) > max_chars:
+            chunks.append("".join(win))
+            # Carry the tail back for the overlap. A single-segment chunk carries
+            # nothing, and at least one segment is always dropped, so every pass
+            # consumes strictly more of the body than the last.
+            keep: list[str] = []
+            if overlap_chars > 0 and len(win) > 1:
+                acc = 0
+                for s in reversed(win):
+                    if acc >= overlap_chars:
+                        break
+                    keep.append(s)
+                    acc += len(s)
+                keep.reverse()
+                if len(keep) >= len(win):
+                    keep = keep[1:]
+            win = keep
+            size = sum(map(len, win))
+        win.append(seg)
+        size += len(seg)
+    if win:
+        chunks.append("".join(win))
     if len(chunks) >= 2 and len(chunks[-1]) < merge_tail_ratio * max_chars:
         tail = chunks.pop()
         chunks[-1] += tail          # NB: not chunks[-2] += pop() — negative index shifts
