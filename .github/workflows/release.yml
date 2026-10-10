@@ -55,7 +55,9 @@ jobs:
         run: test "$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME#v}"
       - name: Publish shim
         working-directory: packaging/npm
-        run: npm publish --provenance --access public
+        # no --provenance: sigstore attestation requires a PUBLIC source repo (E422);
+        # re-enable if/when the repo goes public (then id-token:write is already set)
+        run: npm publish --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
   smoke:
