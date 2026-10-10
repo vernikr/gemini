@@ -93,7 +93,8 @@ All commands accept `--json` (agent-facing output). MCP tools: `analyze_large`,
 
 `bin/gemini-mcp.js` is a ~30-line bootstrap: it runs the version-pinned Python core
 (`uvx --from gemini-mcp-gateway==<same version> gemini-mcp …`), self-installing uv
-through `npx -y @astral-sh/uv` when needed. Zero logic in JS; npm ↔ PyPI versions are
+through the official astral.sh installer when needed (uv is not distributed via npm).
+Zero logic in JS; npm ↔ PyPI versions are
 lockstep. Fleet mode (shared quota ledger on your own server) and full docs:
 [github.com/vernikr/gemini-mcp](https://github.com/vernikr/gemini-mcp) —
 `docs/06-consumer.md`, `docs/08-dual-mode.md`.
