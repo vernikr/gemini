@@ -226,7 +226,7 @@ whole field. Real containers always start at byte 0 → scan only the first ~2�
 avoidable 429s. Fix: non-ASCII-aware estimate, or reuse the chars/token ratio measured
 by the last real `usageMetadata`.
 
-### 2.6 Ledger concurrency edges · **M** · risk medium
+### 2.6 Ledger concurrency edges · **M** · **done 2026-10-10, router 0.1.7 / mcp 0.15.1**
 
 - **RPD race:** the RPD gate excludes `planned` rows (`ledger.py:102-111`) while the
   TPM/RPM windows include them (`WINDOW_STATUSES`). N concurrent processes can all pass
@@ -918,3 +918,61 @@ when doctor fails. `gemini-mcp` **110 → 113 passed / 1.58 s**; router **54 pas
 model — the same budget the deleted script claimed, confirmed rather than assumed.
 Release pipeline green end to end in **198 s** (test 16, pypi 24, npm 8, deploy 46,
 smoke 104); server on **0.15.0**.
+
+---
+
+## 14 · Task 2.6 — an in-flight request is spend (shipped 2026-10-10, router 0.1.7 / mcp 0.15.1)
+
+The item had two halves. The second — `cooldown()` taking the write lock on every read —
+was already closed in wave 3 (§10): it is a plain `SELECT`, expiry moved to `prune`.
+This section is the first half, which needed a decision rather than a measurement.
+
+### The race
+
+The RPD gate excluded `planned` rows; the RPM/TPM windows included them. N processes
+sharing one `state.db` — the documented case of daemon + cron + CLI, and on the VPS the
+gateway runs as a daemon while the same file is reachable over SSH — could all read the
+same free budget, all pass the check, and all send.
+
+The day's cap is the one limit that does not recover. A per-minute 429 costs a few
+seconds of waiting; a daily one costs the rest of the day. Optimism is cheap on a
+recoverable limit and expensive on this one.
+
+### The decision
+
+An in-flight request now counts as spent. It is already on its way.
+
+What makes this safe rather than a leak is the existing `planned_ttl_s` cutoff, which the
+RPD path now uses too: a caller that dies mid-request leaves a `planned` row it will
+never resolve, and without an expiry that row would eat a day's budget forever. With it,
+an abandoned attempt ages out after five minutes.
+
+The alternative — leaving the gate optimistic and relying on callers being sequential —
+was rejected because the shared-file case is a documented design property (FR-C3/C7), not
+an accident.
+
+### Both paths, together
+
+`rpd_spent` and the `gate_snapshot` the budget tables read had to change in the same
+commit, or the CLI and the daemon would have disagreed about the same database. The
+existing equivalence test was calling `rpd_spent` without the new argument, so it
+compared the snapshot against a path nothing uses any more; it now goes through the real
+signature.
+
+### Verification
+
+`test_in_flight_rows_stop_a_second_caller_from_overshooting_the_day` was checked against
+the fix reverted: with `planned_min` removed from the call site the test fails, reporting
+spend 0 where it should report 2. It pins the behaviour, not the implementation. A second
+test covers the abandoned-attempt case, which is the reason the TTL is load-bearing.
+`gemini-router` 54 → **56 passed / 2.11 s**; `gemini-mcp` **113 passed** against the new
+router, no code change beyond the floor.
+
+Server confirmed after deploy: `healthz` on `127.0.0.1:8790` → **0.15.1**, router
+**0.1.7**, unit `active`. Release pipeline green in **165 s** on rerun.
+
+**One CI note worth keeping:** the first attempt failed at dependency resolution — the
+gateway's test job ran 36 s after the router's publish job finished, and PyPI's index had
+not propagated yet. Nothing was wrong with either package; the rerun passed. When a
+release depends on a package published minutes earlier, a red test job is more likely
+index lag than a real break, and a rerun is the right first move.
