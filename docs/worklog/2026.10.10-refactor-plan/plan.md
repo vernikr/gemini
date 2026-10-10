@@ -128,7 +128,7 @@ tests in `tests/test_direct_backend.py` (~60 lines, keep the `resolve_mode`/
 Net ≈ **−215 lines** and, more importantly, one fewer copy of quota accounting that can
 silently drift from `Ledger`. This is the highest-risk class of duplication in the codebase.
 
-### 1.4 De-duplicate the CLI layer · **M** · risk low-medium
+### 1.4 De-duplicate the CLI layer · **M** · **done 2026-10-10, mcp 0.15.0**
 
 `gemini-mcp/cli.py` `_run_quota` (107-123), `_run_calls` (126-144) and `_doctor_direct`
 (147-193) re-implement rendering that already exists in `gemini_router/cli.py`
@@ -338,7 +338,7 @@ of truth: generate the snippet from `_tool_bin()` / `_client_snippets()`
 (`setup_wizard.py:109-150`) and have the docs reference it instead of hand-writing JSON
 in four files.
 
-### 4.3 `gemini-mcp smoke` as a CLI subcommand · **M** · risk low-medium
+### 4.3 `gemini-mcp smoke` as a CLI subcommand · **M** · **done 2026-10-10, mcp 0.15.0**
 
 Today `scripts/smoke.sh:7` sets `BIN="$APP/.venv/bin"` and uses it at `:12,16,29,44`
 (`$BIN/gemini-mcp`, `$BIN/python`), while the systemd unit runs the `uv tool` binary at
@@ -867,3 +867,54 @@ Four tests: script-awareness and its ordering, mixed documents landing between t
 pure-script endpoints, constant cost on a 15 MB input, and the explicit-divisor path.
 `gemini-router` 50 → **54 passed / 1.80 s**; `gemini-mcp` unchanged at **110 passed**
 against the new router, and does not reference the field.
+
+---
+
+## 13 · Tasks 1.4 + 4.3 — one CLI surface (shipped 2026-10-10, mcp 0.15.0 / router 0.1.6)
+
+### 1.4 — delegate the read-only commands
+
+`_run_quota`, `_run_calls` and `_doctor_direct` re-implemented rendering gemini-router
+already had, with different output and 46 duplicated doctor lines. They now build the
+router config for the ledger the current mode actually reads and delegate. `cli.py`
+**393 → 322 lines**, one rendering of the quota table instead of two.
+
+The enabling change is in the router: `cmd_doctor` could only check the config the
+router CLI itself loads. It now takes `(args, cfg=None)` — args alone still loads the
+config, a pre-built `cfg` checks that ledger instead. All five handlers share that
+signature, so the dispatch table stays a table. `cmd_doctor` also stopped treating a
+missing state file as a fault; it prints `not created yet — no calls recorded`, which
+is what a first run on a fresh install is.
+
+`_effective_cfg` is the one piece of real logic left: direct mode keeps its database
+under the config home, not at the default path, so the read-only commands must be
+pointed there or they report on an empty file.
+
+**Behaviour change, deliberate:** direct-mode `quota --json` used to wrap rows as
+`{"backend": "direct", "rows": [...]}` and now emits the same bare array as router mode.
+Two backends answering one flag differently was the defect; nothing consumed the
+wrapper. One test updated.
+
+Verified end to end rather than by unit test alone: wrote a row into the direct-mode
+ledger, then `calls` showed `ok direct-test gemini-3.8-flash` and `quota` showed
+**19/20** — so the delegation reads the right file.
+
+### 4.3 — `smoke` as a subcommand
+
+The real-key first run lived in `scripts/smoke.sh`, which had to reconstruct the
+server's install layout (`getent passwd`, `readlink` through `~/.local/bin`) to find the
+tool's interpreter for its inline router calls. That is a workaround for being outside
+the package. `gemini-mcp smoke` runs the same four steps from inside it and works
+anywhere the CLI does; the script is deleted and `run_remote.sh smoke` calls the
+subcommand.
+
+It stops before spending when doctor fails, and prints `SMOKE FAILED` with the model's
+actual answer instead of asking the operator to compare two lines of output. Three
+tests: spends exactly one call, fails loudly on an unexpected answer, burns no quota
+when doctor fails. `gemini-mcp` **110 → 113 passed / 1.58 s**; router **54 passed**.
+
+**Live run on the VPS, real key:** `countTokens → 121`, model answered `'OK'`,
+`SMOKE OK — backend=router`, and the quota table moved to **19/20** on the chosen
+model — the same budget the deleted script claimed, confirmed rather than assumed.
+Release pipeline green end to end in **198 s** (test 16, pypi 24, npm 8, deploy 46,
+smoke 104); server on **0.15.0**.
