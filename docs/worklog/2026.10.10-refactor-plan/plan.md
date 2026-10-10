@@ -805,3 +805,65 @@ server on its own. Worth remembering: it is the one part of the config that rsyn
 The router reaching PyPI needs either a fresh token or the one-time trusted-publisher
 setup that has been deferred; the second removes the dependency on a token entirely,
 which this incident is a good argument for.
+
+---
+
+## 12 · Task 2.5 — script-aware token estimate (shipped 2026-10-10)
+
+The owner's constraint was explicit: text can mix languages, so a single divisor cannot
+work, and the replacement still has to be cheap.
+
+### Measured before designing
+
+Reference tokenizer (`cl100k_base`) on long homogeneous runs:
+
+| class | chars/token |
+|---|---|
+| Latin letters | 6.78 |
+| Cyrillic | 1.94 |
+| digits | 2.20 |
+
+So `len // 4` is simultaneously too low for Cyrillic and too high for Latin. On 300
+generated mixed-language documents (Russian, English, code, JSON, digits, punctuation,
+2–8 fragments each):
+
+| | median error | worst | under-estimates |
+|---|---|---|---|
+| `len // 4` (before) | **−39 %** | −56 % / +87 % | **275 / 300** |
+| script-aware (after) | **+3 %** | −13 % / +61 % | 90 / 300 |
+
+Under-estimating is the direction that costs money: `gates_for()` passes the TPM
+pre-flight, the request goes out, and the provider answers 429. Long-form spot checks
+after the change — pure Russian +7 % (was −53 %), RU+EN mixed +20 % (was −24 %),
+JSON-heavy −11 % (was −55 %), all-four-mixed +5 % (was −38 %).
+
+### Cost
+
+The estimate runs per request, so a slower formula would have traded one problem for
+another. Measured on 11.16 M characters:
+
+| method | time |
+|---|---|
+| per-character Python loop | 1 034 ms |
+| regex sweep | 1 009 ms |
+| `str.count` per ASCII letter | 375 ms |
+| **`str.count` + head/tail sampling** | **5 ms** |
+
+Above 200 000 characters the estimate scales a head-and-tail sample instead of scanning
+the document, so cost is flat: 5.0 ms at 0.7 M chars, 4.9 ms at 3.7 M, 5.1 ms at 11.1 M.
+Both ends rather than one because they are the parts most likely to differ — front
+matter, data tables, appendices. A small prompt costs ~10 µs.
+
+### Shape
+
+Characters are classified wide-script / latin / digit / other and each class divided by
+its own ratio (1.7 / 5.4 / 1.8 / 2.2, fitted on the mixed set, not on single-language
+runs). Non-ASCII is one class: splitting Cyrillic from other non-ASCII scripts did not
+improve the fit enough to pay for the extra pass. `chars_per_token` remains as an escape
+hatch — passing a number restores the old single-divisor behaviour, so the public
+signature stays compatible; the field default changed to `None` meaning script-aware.
+
+Four tests: script-awareness and its ordering, mixed documents landing between their
+pure-script endpoints, constant cost on a 15 MB input, and the explicit-divisor path.
+`gemini-router` 50 → **54 passed / 1.80 s**; `gemini-mcp` unchanged at **110 passed**
+against the new router, and does not reference the field.
