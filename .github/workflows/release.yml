@@ -71,13 +71,15 @@ jobs:
       - name: Consumer E2E from the public registries (retry while propagating)
         run: |
           V="${GITHUB_REF_NAME#v}"; ok=0
-          for _ in 1 2 3 4 5 6 7 8; do
+          for _ in $(seq 1 12); do
             if uvx --refresh --from "gemini-mcp-gateway==$V" gemini-mcp --version; then ok=1; break; fi
             sleep 30
           done
           test "$ok" = 1 || { echo "PyPI smoke failed for $V"; exit 1; }
           ok=0
-          for _ in 1 2 3 4 5 6 7 8; do
+          # npm propagation observed up to ~7 min (0.8.2: live 24s after the last of
+          # 8×30s retries) — 16×30s = 8 min window
+          for _ in $(seq 1 16); do
             if npx -y "@vernikr/gemini-mcp@$V" --version; then ok=1; break; fi
             sleep 30
           done
