@@ -198,17 +198,7 @@ offset, RAM). Same tables exposed by MCP `quota_status`/`router_logs` and REST `
   key import from `/opt/apps/external-consumer/.env` (if `GEMINI_API_KEYS` unset), unit install,
   `daemon-reload`, enable+start, doctor run. Never edits unrelated-service/ufw/sysctl.
 
-Freebuff wiring (`~/.agents/mcp.json`, home-level per bug #957):
-
-```jsonc
-{ "mcpServers": {
-    "gemini": {                       // A) SSH-stdio (primary)
-      "command": "ssh",
-      "args": ["root@YOUR_VPS_HOST", "~/.local/bin/gemini-mcp", "stdio"] },
-    "gemini-http": {                  // B) HTTP via pre-opened local tunnel
-      "type": "http", "url": "http://127.0.0.1:8790/mcp",
-      "headers": { "Authorization": "Bearer $GEMINI_MCP_TOKEN" } } } }
-```
+Client wiring (both transports, quirks and verification prompts): `freebuff-wiring.md`.
 
 ## 7. Stack & rationale
 

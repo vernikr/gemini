@@ -96,9 +96,8 @@ def _run_prune(app_cfg: AppCfg, router_cfg, args) -> int:
     router, _, mode = make_routers(app_cfg, router_cfg)
     res = router.ledger.prune(audit_keep_days=args.audit_days or lcfg.audit_keep_days,
                               cache_ttl_s=router_cfg.cache_ttl_h * 3600, dry=args.dry)
-    days = 0 if args.dry else enforce_audit_size(router.ledger, lcfg.audit_max_mb)
-    out = {"backend": mode, "jsonl_removed": removed, **res,
-           "audit_window_days_now": days or None, "dry": args.dry}
+    audit = {} if args.dry else enforce_audit_size(router.ledger, lcfg.audit_max_mb)
+    out = {"backend": mode, "jsonl_removed": removed, **res, **audit, "dry": args.dry}
     console.print(json.dumps(out, default=str))
     return 0
 

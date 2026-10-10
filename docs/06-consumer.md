@@ -205,4 +205,5 @@ npx -y @vernikr/gemini-mcp calls -n 20   # local audit tail
   `launchctl load ~/Library/LaunchAgents/com.vernikr.gemini-tunnel.plist`
   (`Load failed: 5` there means it's ALREADY loaded — verify with curl instead).
 - Problems: `doctor` first; deeper: `docs/08-dual-mode.md` (modes),
-  `docs/05-packaging.md` (install internals), `docs/blockers/` (known risks).
+  `docs/worklog/archive/05-packaging.md` (install internals),
+  `docs/blockers/` (known risks).

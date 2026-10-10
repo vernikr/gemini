@@ -3,6 +3,7 @@ registration, call_tool roundtrip, bearer middleware, custom REST routes."""
 from __future__ import annotations
 
 import json
+import time
 
 import httpx
 import pytest
@@ -13,6 +14,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 from conftest import FakeCtx, FakeRouter, make_app_cfg, make_deps, real_router_cfg
+from gemini_mcp.config import AppCfg
+from gemini_mcp.ingest import make_ticket
 from gemini_mcp.progress import ProgressEmitter
 from gemini_mcp.server import AuthMetadataRoutes, BearerMiddleware, build_http_app, build_server
 from gemini_mcp.tools import (
@@ -252,3 +255,48 @@ def test_inline_doc_guard_only_looks_at_the_head():
     quoted = "Notes on file formats.\n\n" + ("filler. " * 900) \
         + "\nA PDF starts with the bytes %PDF-1.7 and an OOXML file with PK."
     _inline_doc_guard(quoted, "body")                           # must not raise
+
+
+async def test_upload_enforces_the_ticket_size(tmp_path, monkeypatch):
+    """The ticket is size-bound, and the check has to happen BEFORE the body is read:
+    buffering first would let one oversized upload eat the whole memory budget."""
+    monkeypatch.setenv("GEMINI_MCP_TOKEN", "tok123")
+    inbox = tmp_path / "inbox"
+    cfg = AppCfg.model_validate({"logging": {"dir": str(tmp_path / "logs")},
+                                 "ingest": {"dir": str(inbox), "max_file_mb": 1,
+                                            "ticket_ttl_s": 600}})
+    deps = make_deps(router=Router(real_router_cfg(tmp_path)), app_cfg=cfg)
+    app = build_http_app(build_server(deps), cfg, "tok123")
+    exp = int(time.time()) + 600
+
+    async def _chunks():
+        yield b"z" * 2048                       # chunked → no Content-Length to check
+
+    def url(uid, size):
+        return (f"/v1/upload/{uid}?exp={exp}&size={size}"
+                f"&sig={make_ticket('tok123', uid, exp, size)}")
+
+    async with await _client(app) as c:
+        # declared over the configured cap → refused, nothing buffered or written
+        r = await c.put(url("u1", 5 * 1_048_576), content=b"x" * 1024)
+        assert r.status_code == 413 and r.json()["error"] == "file_too_large"
+        assert r.json()["max_bytes"] == 1_048_576
+
+        # Content-Length over the ticket's size → refused before the body is read
+        r = await c.put(url("u2", 1024), content=b"x" * 4096)
+        assert r.status_code == 413 and r.json()["error"] == "file_too_large"
+        assert r.json()["max_bytes"] == 1024
+
+        # chunked (no Content-Length to check) and the wrong length → refused after
+        # reading, still nothing stored
+        r = await c.put(url("u4", 1024), content=_chunks())
+        assert r.status_code == 413 and r.json()["error"] == "size_mismatch"
+        assert r.json()["bytes"] == 2048 and r.json()["expected"] == 1024
+
+        # exact match is stored
+        r = await c.put(url("u3", 1024), content=b"y" * 1024)
+        assert r.status_code == 200 and r.json()["bytes"] == 1024
+        assert (inbox / "u3").read_bytes() == b"y" * 1024
+
+    stored = {p.name for p in inbox.iterdir()}
+    assert stored == {"u3"}

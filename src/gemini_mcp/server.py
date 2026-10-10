@@ -72,7 +72,8 @@ server-side); binaries fail fast with ZERO quota spent."""
 # pointless retry loop.
 _TOOL_ERROR_STATUS = {"quota_exhausted": 429, "plan_budget_insufficient": 429,
                       "raw_document_inlined": 400, "bad_size": 400, "bad_ticket": 400,
-                      "file_too_large": 413, "upload_not_found": 404,
+                      "file_too_large": 413, "size_mismatch": 413,
+                      "upload_not_found": 404,
                       "binary_file_needs_conversion": 415, "conversion_unavailable": 415,
                       "ticket_expired": 410, "already_uploaded": 409,
                       "bad_signature": 403, "ingest_disabled": 503}
@@ -117,17 +118,14 @@ def build_server(deps: Deps) -> MCPServer:
         ctx: Context | None = None,
     ) -> dict:
         """Analyze a massive text body with Gemini without polluting your context.
-        ALWAYS relay the response's 'report' field (route · thinking · model · spend
-        · rough edges) to the user in chat.
-        Raw document payloads (RTF/PDF/DOCX markers) in 'body' are REJECTED —
-        for files use file_upload_ticket + analyze_file instead.
+        ALWAYS relay the response's 'report' field to the user in chat.
 
-        The server measures the body, and if it exceeds the input budget it splits it
-        into overlapping chunks (each sent with a 'CHUNK N/M' service note), analyzes
-        every chunk separately, then consolidates all answers (recursively if needed)
-        into one compact result. Quota is pre-checked: if the plan (chunks + 1
-        consolidation) does not fit the remaining daily budget, the call fails fast
-        with 'plan_budget_insufficient' BEFORE spending anything.
+        Raw document payloads (RTF/PDF/DOCX markers) in 'body' are REJECTED — for
+        files use file_upload_ticket + analyze_file instead.
+
+        Quota is pre-checked: if the plan (chunks + 1 consolidation) does not fit the
+        remaining daily budget the call fails fast with 'plan_budget_insufficient'
+        BEFORE spending anything.
 
         Args:
             task: what to do with the body (analysis instructions for the model).
@@ -233,15 +231,13 @@ def build_server(deps: Deps) -> MCPServer:
         size_bytes: int,
         ctx: Context | None = None,
     ) -> dict:
-        """Reserve a file upload (step 1 of 2). Returns {upload_id, upload_url,
-        scp_path?, expires_in_s, instructions}.
+        """Reserve a file upload (step 1 of 2 — transport details are in FILE INGEST
+        above). Returns {upload_id, upload_url, scp_path?, expires_in_s, instructions};
+        upload the bytes, then call analyze_file(task, upload_id).
 
-        upload_url is an HMAC one-time link (15 min, bound to declared size, no
-        bearer needed): upload with ONE command — `curl -T <file> '<upload_url>'`
-        through the :8790 tunnel — or `scp <file> <scp_path>` without any tunnel.
-        Then call analyze_file(task, upload_id) (step 2). ANY file can be uploaded;
-        the SERVER decides split/convert: text-like files are analyzed, RTF is
-        extracted server-side, binaries fail fast with zero quota spent."""
+        ANY file can be uploaded; the SERVER decides split/convert: text-like files are
+        analyzed, RTF is extracted server-side, binaries fail fast with zero quota
+        spent."""
         return await file_upload_ticket_tool(deps, filename, size_bytes)
 
     @srv.tool()
@@ -356,11 +352,27 @@ def build_server(deps: Deps) -> MCPServer:
         try:
             verify_ticket(token, uid, q.get("exp", ""), q.get("size", ""),
                           q.get("sig", ""))
+            limit = cfgi.max_file_mb * 1_048_576
+            # The signature binds the upload to its declared size, so that size is the
+            # cap — checked BEFORE buffering, or an oversized body could consume the
+            # whole memory budget before any check ran.
+            declared = int(q["size"])
+            over = (request.headers.get("content-length") or "").isdigit() \
+                and int(request.headers["content-length"]) > declared
+            if over or declared > limit:
+                raise IngestError("file_too_large",
+                                  bytes=int(request.headers.get("content-length",
+                                                                declared)),
+                                  max_bytes=min(declared, limit))
             data = await request.body()
-            path = save_upload(Path(cfgi.dir), uid, data,
-                               cfgi.max_file_mb * 1_048_576)
+            if len(data) != declared:      # chunked or lying Content-Length
+                raise IngestError("size_mismatch", bytes=len(data), expected=declared,
+                                  hint="body must match the size the ticket was issued "
+                                       "for; issue a fresh file_upload_ticket")
+            path = save_upload(Path(cfgi.dir), uid, data, limit)
         except IngestError as e:
             code = {"ticket_expired": 410, "already_uploaded": 409,
+                    "file_too_large": 413, "size_mismatch": 413,
                     "ingest_disabled": 503}.get(e.payload["error"], 400)
             return JSONResponse(e.payload, status_code=code)
         deps.logger.info("ingest: stored %s (%d bytes)", uid, path.stat().st_size)

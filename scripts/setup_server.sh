@@ -78,9 +78,12 @@ as_app uv pip install --no-cache "mcp[cli]>=1.9" "uvicorn>=0.30" "starlette>=0.3
 # already installed from local source above, so we skip dependency resolution entirely.
 as_app uv pip install --no-cache --no-deps "$APP"
 
-# ---- released package via `uv tool` — the binary the systemd unit runs (push-CD
-# manages its version: /usr/local/bin/deploy-tools does `uv tool install --force`).
-# The .venv above stays as the source/dev fallback (doctor, status, local patches).
+# ---- released package via `uv tool` — the binary the systemd unit runs, the one
+# smoke.sh exercises, and the one push-CD re-installs on every release
+# (/usr/local/bin/deploy-tools does `uv tool install --force`).
+# The .venv above is the SOURCE fallback: it installs gemini-router from local checkout,
+# so it is the only path that works while a router version is unpublished on PyPI.
+# Do not remove it while router releases stay manual.
 UHOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
 TOOL_BIN="$UHOME/.local/bin/gemini-mcp"
 VER="$(sed -n 's/^version = "\(.*\)"/\1/p' "$APP/pyproject.toml" | head -1)"

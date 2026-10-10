@@ -5,7 +5,9 @@ Conventional Commits, SemVer, push after every successful step, docs updated wit
 functional changes, blockers in `docs/blockers/`). Repo-specific rules:
 
 ## Context
-- Stage docs `docs/01..04` are the contract; do not contradict them silently — update them.
+- The contract is `docs/02-requirements.md` (FR-x) + `docs/03-architecture.md`; do not
+  contradict them silently — update them. Superseded stage docs live in
+  `docs/worklog/archive/` and are history, not contract.
 - Router library = separate repo `gemini-router` (pinned by git tag in pyproject);
   quota/ledger logic lives THERE, pipeline/MCP/progress/logging lives HERE.
 - Target host: VPS YOUR_VPS_HOST (Ubuntu 24.04, 1 vCPU, 1 GB RAM, production external network services).
@@ -28,7 +30,8 @@ functional changes, blockers in `docs/blockers/`). Repo-specific rules:
   `/opt/apps/external-consumer/.env`. Shared state: `/opt/apps/shared/gemini-router/state.db`.
 
 ## Testing
-- No network in CI: respx mocks shaped per `docs/01` §3.1. Real API only via
+- No network in CI: respx mocks reproduce the provider's 429/5xx payload shapes.
+  Real API only via
   `scripts/smoke.sh` on the server (budget: ≤2 RPD per run).
 - Every FR-x from `docs/02` maps to a test; keep the mapping in test docstrings.
 

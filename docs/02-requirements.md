@@ -1,6 +1,7 @@
 # 02 · Functional & Business Requirements — Stage 2 artifact
 
-Date: 2026-10-08 · Inputs: `01-unpacking-reframing.md` · Priority: MUST / SHOULD / MAY.
+Date: 2026-10-08 · Inputs: `worklog/archive/01-unpacking-reframing.md` ·
+Priority: MUST / SHOULD / MAY.
 Numeric defaults live in `config.yaml` (single source); this doc references key names, not values.
 
 ## A. Business requirements

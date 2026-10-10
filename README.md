@@ -88,13 +88,13 @@ GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor
 
 | Stage | Artifact |
 |---|---|
-| 1 · Unpacking/reframing + Q&A | [`docs/01-unpacking-reframing.md`](docs/01-unpacking-reframing.md) |
-| 2 · Functional/business requirements | [`docs/02-requirements.md`](docs/02-requirements.md) |
-| 3 · Architecture & stack | [`docs/03-architecture.md`](docs/03-architecture.md) |
-| 4 · Plan (M0–M6) | [`docs/04-plan.md`](docs/04-plan.md) |
+| Functional/business requirements | [`docs/02-requirements.md`](docs/02-requirements.md) |
+| Architecture & stack | [`docs/03-architecture.md`](docs/03-architecture.md) |
 | Consumer guide (client JSON, direct mode) | [`docs/06-consumer.md`](docs/06-consumer.md) |
 | Dual-mode backend design | [`docs/08-dual-mode.md`](docs/08-dual-mode.md) |
+| CI/CD and release mechanics | [`docs/09-ci.md`](docs/09-ci.md) |
 | Risks | [`docs/blockers/`](docs/blockers/) |
+| Superseded stage docs and ops logs | [`docs/worklog/archive/`](docs/worklog/archive/) |
 
 ## Planned usage (Freebuff, `~/.agents/mcp.json`)
 

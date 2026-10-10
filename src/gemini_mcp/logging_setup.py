@@ -125,11 +125,25 @@ def prune_jsonl(cfg: LoggingCfg, now: float | None = None, dry: bool = False) ->
     return removed
 
 
-def enforce_audit_size(ledger, max_mb: float) -> float:
-    """Halve the audit retention window until the state db fits the cap (FR-E6)."""
-    days = 3650.0
+def enforce_audit_size(ledger, max_mb: float) -> dict:
+    """Shrink the audit tables until the state db fits `max_mb` (FR-E6).
+
+    DELETE never shrinks a SQLite file, so the prune has to be followed by a VACUUM —
+    without it a retention window can be halved forever and the file will not lose a
+    byte. Steps down progressively so a slightly-over cap keeps most of the history.
+    """
+    out = {"cap_met": True, "keep_days_used": None, "size_mb": 0.0}
     path = Path(ledger.path)
-    while path.exists() and path.stat().st_size > max_mb * 1e6 and days > 1:
-        days = max(1.0, days / 2)
+    if not path.exists():
+        return out
+    out["size_mb"] = path.stat().st_size / 1e6
+    if out["size_mb"] <= max_mb:
+        return out
+    for days in (30.0, 7.0, 1.0):
         ledger.prune(audit_keep_days=days)
-    return days
+        ledger.vacuum()
+        out.update(keep_days_used=days, size_mb=path.stat().st_size / 1e6,
+                   cap_met=path.stat().st_size <= max_mb * 1e6)
+        if out["cap_met"]:
+            return out
+    return out

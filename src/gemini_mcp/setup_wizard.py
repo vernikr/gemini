@@ -1,7 +1,7 @@
-"""`gemini-mcp setup` — idempotent consumer onboarding (M7.2, 0.8.0).
+"""`gemini-mcp setup` — idempotent consumer onboarding.
 
 Writes $GEMINI_MCP_HOME (~/.config/gemini-mcp)/{config.yaml,.env 0600}, optionally
-probes keys live (listModels via MemLedger router — zero disk state, zero RPD spend),
+probes keys live (listModels on an in-memory ledger — zero disk state, zero RPD spend),
 prints ready-to-paste client snippets. Non-interactive with --json/--keys/--backend;
 interactive otherwise (one fleet-vs-simple question, masked key paste). Re-run = no-op
 + report unless --force. Secrets never appear in output — only sha256 fingerprints."""
@@ -24,7 +24,6 @@ from gemini_router.config import Config as RouterConfig
 from gemini_router.config import key_id
 
 from . import __version__
-from .backends import MemLedger
 from .config import config_home
 
 FLEET_REPOS = ("gemini-mcp", "gemini-router")     # github.com/vernikr/<name>, private
@@ -316,8 +315,9 @@ def deploy_fleet(*, host: str, user: str, projects_dir: Path,
 
 
 async def _probe_keys(keys: list[str]) -> list[dict]:
-    cfg = RouterConfig.model_validate({"api_keys": keys, "state_path": ":memory:"})
-    router = Router(cfg, ledger=MemLedger())
+    # ':memory:' → the real Ledger on a throwaway SQLite db: no files, no RPD spend
+    router = Router(RouterConfig.model_validate({"api_keys": keys,
+                                                 "state_path": ":memory:"}))
     out = []
     try:
         avail = await router.availability()

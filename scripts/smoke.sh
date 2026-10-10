@@ -4,7 +4,12 @@
 # exactly ONE tiny generate call → spends 1 RPD of the first chain model.
 set -euo pipefail
 APP=/opt/apps/gemini-mcp
-BIN="$APP/.venv/bin"
+# The binary the systemd unit runs (`uv tool install` → ~/.local/bin), resolved from the
+# passwd entry so sudo's HOME handling cannot point us at the wrong install.
+UHOME="$(getent passwd "$(id -un)" | cut -d: -f6)"
+BIN="$UHOME/.local/bin"
+# Inline steps import gemini_router, so they need that tool's own interpreter.
+PY="$(dirname "$(readlink -f "$BIN/gemini-mcp")")/python"
 set -a; . "$APP/.env"; set +a
 cd "$APP"
 
@@ -13,7 +18,7 @@ echo "== 1/4 doctor (online: listModels → exact chain IDs resolve) =="
 
 echo
 echo "== 2/4 countTokens (free pre-flight, ledger kind='count') =="
-"$BIN/python" - <<'PY'
+"$PY" - <<'PY'
 import asyncio
 from gemini_router import Config, Router
 async def main():
@@ -26,7 +31,7 @@ PY
 
 echo
 echo "== 3/4 one tiny generate (1 RPD; thinking low to keep it cheap) =="
-"$BIN/python" - <<'PY'
+"$PY" - <<'PY'
 from gemini_router import Config, Router, RouterRequest
 r = Router(Config.load())
 # NO small max_output_tokens here: 3.x thinking tokens count toward the cap —
