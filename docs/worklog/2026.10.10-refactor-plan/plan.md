@@ -353,7 +353,7 @@ Fix: add `gemini-mcp smoke` (doctor → `countTokens` → one tiny `generate` �
 so it exercises the shipped binary; reduce `smoke.sh` to a wrapper; drop the source venv
 install. Faster provisioning, less disk, and a verification that actually means something.
 
-### 4.4 Errors that name the fix · **M**
+### 4.4 Errors that name the fix · **M** · **done 2026-10-10, router 0.1.8 / mcp 0.16.0**
 
 Already the project's strongest feature (structured `quota_exhausted` /
 `plan_budget_insufficient` / `raw_document_inlined`, each with a `fix` field). Extend the
@@ -361,7 +361,7 @@ same shape to the REST surface (2.3) and to `serve`'s missing-token path; make `
 distinguish "no keys" / "no state file" / "`listModels` failed" / "chain not live" in
 both message and exit code.
 
-### 4.5 Trim repeated tool-schema prose · **S** · risk low-medium
+### 4.5 Trim repeated tool-schema prose · **S** · **done 2026-10-10, mcp 0.16.0**
 
 `analyze_large` / `analyze_file` each carry 15 parameters (14 + `ctx`) with long
 docstrings, `gemini_generate` 12; and `INSTRUCTIONS` (**2 559 chars**, `server.py:32-68`)
@@ -976,3 +976,54 @@ gateway's test job ran 36 s after the router's publish job finished, and PyPI's 
 not propagated yet. Nothing was wrong with either package; the rerun passed. When a
 release depends on a package published minutes earlier, a red test job is more likely
 index lag than a real break, and a rerun is the right first move.
+
+---
+
+## 15 · Tasks 4.4 + 4.5 — say it once, and name the failure (shipped 2026-10-10, router 0.1.8 / mcp 0.16.0)
+
+### 4.5 — one statement of the file flow
+
+Wave 2 cut the prose duplication and left two payload copies of the ingest procedure:
+`quota_status.file_flow` and the `fix` on a raw-document rejection. Both now carry the
+same `FILE_FLOW` string. Two copies of a *procedure* drift, and an agent following a
+stale one loses a call to a wrong step — that is different from prose repetition, which
+only costs context.
+
+What each site keeps is what only it can say: the guard names the marker that fired and
+the field, plus the escape hatch for genuinely wanting markup as text; `INSTRUCTIONS`
+keeps the transport detail (`curl -T` through the :8790 tunnel, or `scp` without it). A
+test asserts the two payloads are the same string rather than two paraphrases, so the
+next edit cannot split them quietly. `INSTRUCTIONS` block 5 lines → 4, and the procedure
+now lives in one place in code.
+
+### 4.4 — exit codes that name the failure
+
+`doctor` returned 1 for no keys, an unreadable state file, and a chain with no reachable
+model. Those need opposite responses, and `setup_server.sh` was guessing from the
+message text. Now `0` ok · `3` no API keys · `4` state file unusable · `5` no chain
+model reachable · `6` (gateway) log directory unwritable; config and usage stay `2`.
+
+Two things fell out of doing it properly:
+
+- **The chain case was passing silently.** The probe printed `chain available: NONE` in
+  red and `doctor` still returned 0, because only the missing-keys check set the flag.
+  Measured rather than assumed — the previous revision returns **0** on an unreachable
+  chain, the new one returns **5**. A misconfigured chain now fails the command it is
+  failing in.
+- **The gateway was collapsing the router's codes to 1**, which threw the reason away.
+  They pass through now.
+
+Verified against the real CLI, not just unit tests: 3 / 0 / 5 / 4 from `gemini-router`,
+and 3 / 0 / 5 / 6 through `gemini-mcp doctor` (the 6 case needed a genuinely
+read-only log directory). `gemini-router` **57 passed**, `gemini-mcp` **115 passed**.
+
+### The npm half of this release did not go out
+
+`@vernikr/gemini-mcp` is pinned at 0.15.1. The cause is not in the code: `NPM_TOKEN` is
+revoked, and npm answers a refused scoped `PUT` with **404**, which reads as "no such
+package". Diagnosed by adding a `npm whoami` check ahead of the publish — **401
+Unauthorized**. Recorded as blocker **b07** with the one action needed.
+
+PyPI 0.16.0, deploy and the server are all green; the npm package is a bootstrap shim
+pinning `gemini-mcp-gateway==<version>`, so npm consumers get a working gateway one
+release behind. The job now fails with the reason in the log rather than a 404.
