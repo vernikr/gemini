@@ -184,7 +184,11 @@ def _run_doctor(app_cfg: AppCfg, router_cfg, args) -> int:
     console.print(f"  thinking default: {app_cfg.thinking.default}")
     secrets_line = redact("keys look like AIzaSyDUMMYdummy123 in logs", [])
     console.print(f"  redaction self-test: {'OK' if 'AIza' not in secrets_line else 'FAIL'}")
-    return rc if rc == 0 and writable else 1
+    if not writable:
+        console.print("[red]FAILED[/red] — the log directory is not writable, so "
+                      "nothing will be recorded")
+        return 6 if rc == 0 else rc
+    return rc
 
 
 def _project_root() -> Path | None:

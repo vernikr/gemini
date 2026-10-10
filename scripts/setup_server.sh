@@ -152,7 +152,9 @@ if sudo -u "$APP_USER" env HOME="$UHOME" bash -c "set -a; . '$ENVF'; set +a; cd 
   echo "Next: gemini-mcp smoke   # first real-key run, spends ≤1 RPD"
 else
   echo
-  echo "SETUP INCOMPLETE — doctor failed (output above). Likely cause: GEMINI_API_KEYS empty."
+  # 3 = no API keys, which is the only failure this script can cause; anything else
+  # (4 = state file unusable, 5 = no chain model reachable) needs the output above.
+  echo "SETUP INCOMPLETE — doctor failed (output above). Most likely: GEMINI_API_KEYS empty."
   echo "Fix (on the server):"
   echo "  1) echo 'GEMINI_API_KEYS=<key1,key2>' >> $ENVF   # keys from AI Studio"
   echo "  2) systemctl restart gemini-mcp && systemctl is-active gemini-mcp"

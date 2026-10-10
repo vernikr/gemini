@@ -95,3 +95,21 @@ def test_setup_from_keys_file(tmp_path, monkeypatch, capsys):
     assert rc == 0 and rep["key_ids"] and K1 not in rep and K2 not in str(rep)
     env = (home / ".env").read_text()
     assert K1 in env and K2 in env                      # stored, fingerprints printed
+def test_doctor_exit_codes_pass_through(tmp_path, monkeypatch):
+    """The router's codes name the failure; collapsing them to 1 threw the reason away."""
+    _home(tmp_path, monkeypatch)
+    monkeypatch.setenv("GEMINI_MCP_BACKEND", "direct")
+    monkeypatch.delenv("GEMINI_API_KEYS", raising=False)
+    assert main(["doctor", "--offline"]) == 3          # no keys
+
+    monkeypatch.setenv("GEMINI_API_KEYS", "AIzaSyDUMMYdummy1234567890ab")
+    assert main(["doctor", "--offline"]) == 0
+
+    ro = tmp_path / "ro"
+    ro.mkdir()
+    ro.chmod(0o555)
+    cfg = tmp_path / "cfg.yaml"
+    cfg.write_text(f"logging:\n  dir: {ro}/app.log\n")
+    rc = main(["--config", str(cfg), "doctor", "--offline"])
+    ro.chmod(0o755)                                    # let tmp_path clean up
+    assert rc == 6                                     # log dir unwritable

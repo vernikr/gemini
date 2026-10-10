@@ -61,11 +61,11 @@ user in chat verbatim; if rough_edges > 0, say in plain words what happened
 failed chunks — details are in meta.progress_trace). If the call errored, say so
 plainly with the reset ETA. Never silently swallow retries, waits or fallbacks.
 
-FILE INGEST: to analyze a local file — file_upload_ticket(filename, size_bytes) →
-upload the bytes with ONE command (curl -T <file> '<upload_url>' through the :8790
-tunnel; the signed URL IS the auth, or scp <file> <scp_path> without the tunnel) →
-analyze_file(task, upload_id, …). The server extracts text itself (RTF supported
-server-side); binaries fail fast with ZERO quota spent.
+FILE INGEST: the flow is ticket → upload → analyze_file (the exact steps ride in the
+quota_status and raw_document_inlined payloads). What only this text can say is how to
+move the bytes: ONE command, `curl -T <file> '<upload_url>'` through the :8790 tunnel —
+the signed URL IS the auth — or `scp <file> <scp_path>` without the tunnel. Binaries
+fail fast with ZERO quota spent.
 
 SIZE DISCIPLINE — 20 MB per upload. That is a memory limit, not a policy: the server
 holds the extracted text in RAM while chunking, so an oversized file can push the

@@ -302,3 +302,20 @@ async def test_upload_enforces_the_ticket_size(tmp_path, monkeypatch):
 
     stored = {p.name for p in inbox.iterdir()}
     assert stored == {"u1", "u3"}
+
+
+async def test_the_file_flow_is_stated_once(tmp_path):
+    """Both payload hints are the same string. They were four copies, and copies of a
+    procedure drift — an agent following a stale one loses a call to a wrong step."""
+    from gemini_mcp.tools import FILE_FLOW
+
+    router = Router(real_router_cfg(tmp_path))
+    deps = make_deps(router=router, app_cfg=make_app_cfg(tmp_path / "logs"))
+    q = await quota_status_tool(deps)
+    assert q["file_flow"] == FILE_FLOW
+
+    with pytest.raises(ToolError) as ei:
+        await gemini_generate_tool(deps, ProgressEmitter(FakeCtx()),
+                                   {"prompt": "{\\rtf1\\ansi inlined"})
+    fix = json.loads(str(ei.value))["fix"]
+    assert FILE_FLOW in fix                     # the same sentence, not a paraphrase

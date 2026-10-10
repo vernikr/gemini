@@ -125,6 +125,15 @@ def _fail(deps: Deps, emitter: ProgressEmitter, tool: str, request_id: str | Non
 
 
 _DOC_MARKERS = (("{\\rtf1", "RTF"), ("%PDF-", "PDF"), ("PK\x03\x04", "DOCX/XLSX (zip)"))
+
+# The one statement of the file flow. Agents read it where they are, so it rides in two
+# payloads — quota_status, which agents reliably call first, and the raw-document
+# rejection — but both are this string, so the steps cannot drift apart.
+FILE_FLOW = ("file_upload_ticket(filename, size_bytes) \u2192 HTTP PUT the bytes to the "
+             "returned upload_url \u2192 analyze_file(upload_id, task). Extraction "
+             "(pandoc), chunking and quota accounting happen server-side. Never inline "
+             "raw file contents into a text tool: the markup is unreadable for the model "
+             "(non-ASCII survives as hex escapes) and burns your context.")
 # Container signatures only ever sit at offset 0; scanning the whole field would reject
 # legitimate text that merely quotes one (a document ABOUT the PDF format, say).
 _DOC_HEAD_CHARS = 4096
@@ -143,15 +152,9 @@ def _inline_doc_guard(text: str | None, field: str) -> None:
                 "error": "raw_document_inlined",
                 "detected": kind,
                 "field": field,
-                "fix": (f"Do not paste raw file contents into '{field}' — {kind} "
-                        "markup is unreadable for the model (non-ASCII text is "
-                        "hex-escaped) and burns your context. Use the file flow: "
-                        "1) file_upload_ticket(filename, size_bytes) "
-                        "2) HTTP PUT the file bytes to the returned upload_url "
-                        "3) analyze_file(upload_id, task). Extraction (pandoc), "
-                        "chunking and quota accounting happen server-side. If you "
-                        "genuinely meant to analyze markup AS text, escape or "
-                        "re-encode it first."),
+                "fix": (f"raw_document_inlined: {kind} markup detected in '{field}'. "
+                        f"{FILE_FLOW} If you genuinely meant to analyze markup AS "
+                        "text, escape or re-encode it first."),
             }, ensure_ascii=False))
 
 
@@ -334,11 +337,7 @@ async def quota_status_tool(deps: Deps) -> dict:
         "backend": deps.backend, "counters": counters,
         # Hint rides in the PAYLOAD: Freebuff truncates tool descriptions, but
         # agents reliably call quota_status first and read what comes back.
-        "file_flow": ("To analyze a file (RTF/DOCX/PDF/txt): file_upload_ticket"
-                      "(filename, size_bytes) → HTTP PUT the bytes to upload_url → "
-                      "analyze_file(upload_id, task). NEVER inline raw file contents "
-                      "into gemini_generate/analyze_large — raw document markup is "
-                      "rejected (unreadable for the model); extraction is server-side."),
+        "file_flow": FILE_FLOW,
     }
 
 
