@@ -525,3 +525,47 @@ npm `@vernikr/gemini-mcp 0.13.0`. The published wheel declares
 Clean consumer install from public registries: `gemini-mcp-gateway==0.13.0` resolves
 `gemini-router 0.1.3` on its own, `Ledger.vacuum` is present, `--version` reports
 0.13.0, `doctor --offline` runs clean.
+
+---
+
+## 8 · Measured: what the `max_file_mb` cap actually costs (input for wave 3)
+
+The plan carried an extrapolated claim that a 50 MB ingest peaks at or above
+`MemoryMax`. Measured instead, on the real `analyze_large` pipeline with respx-mocked
+HTTP (no quota spent), sizing each body by its **UTF-8 byte length** — which is what
+`max_file_mb` measures. An earlier run of this probe sized bodies in characters and
+therefore understated Cyrillic files by roughly 2×; the numbers below are the
+byte-accurate ones.
+
+Idle process: **74.7 MB**. VPS unit: `MemoryMax=350M` (`setup_server.sh:132`), and
+`owner deployment notes` fixes background services at 250–350 MB so the OOM killer never
+threatens the production external network services — raising the ceiling is not an option.
+
+| Uploaded file (Cyrillic text) | Characters | Chunks | RSS peak | vs 350 MB |
+|---|---|---|---|---|
+| 10 MB | 5 592 384 | 9 | **130.5 MB** | 37 % |
+| 20 MB | 11 184 768 | 18 | **223.0 MB** | 64 % |
+| 30 MB | 16 777 200 | 26 | **333.9 MB** | **95 %** |
+| 40 MB | 22 369 584 | 35 | **472.5 MB** | **135 % — killed** |
+
+Growth is close to linear at ≈ **11.4 MB of RSS per 1 MB of file**, so the 350 MB
+ceiling is crossed at roughly **31 MB**. Concurrency does not double the peak inside
+one process — two simultaneous 35 MB jobs peaked at 243.1 MB — because freed chunk
+buffers are reused; a single large job is the binding case, not two medium ones.
+
+Two consequences:
+
+1. **The configured `max_file_mb: 50` is unreachable.** The service is OOM-killed near
+   31 MB, well before the cap it advertises. The failure mode is the worst available
+   one: the whole unit dies and every in-flight job with it, rather than one request
+   being refused.
+2. **The driver is characters, not bytes.** Cyrillic packs ~2 bytes per character, so
+   an English or ASCII document reaches the same character count — and therefore the
+   same memory — at about half the file size. Any cap chosen in megabytes is really a
+   cap on extracted characters, and is twice as tight for Latin text.
+
+A cap of **20 MB** leaves 127 MB of headroom (64 % of budget) and is honest for both
+scripts. The root cause is wave 3 work: the pipeline holds several full copies of the
+body at once (`task + body` for `count_tokens`, per-chunk prompt strings, the
+consolidation input), and removing those copies is what would make a larger cap
+genuinely reachable rather than merely advertised.
