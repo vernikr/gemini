@@ -79,7 +79,7 @@ as_app uv pip install --no-cache "mcp[cli]>=1.9" "uvicorn>=0.30" "starlette>=0.3
 as_app uv pip install --no-cache --no-deps "$APP"
 
 # ---- released package via `uv tool` — the binary the systemd unit runs, the one
-# smoke.sh exercises, and the one push-CD re-installs on every release
+# `gemini-mcp smoke` exercises, and the one push-CD re-installs on every release
 # (/usr/local/bin/deploy-tools does `uv tool install --force`).
 # The .venv above is the SOURCE fallback: it installs gemini-router from local checkout,
 # so it is the only path that works while a router version is unpublished on PyPI.
@@ -145,18 +145,18 @@ systemctl restart gemini-mcp.service
 sleep 2
 systemctl --no-pager status gemini-mcp.service | sed -n '1,5p' || true
 
-# ---- offline sanity (no quota spent; online checks live in smoke.sh) ----
+# ---- offline sanity (no quota spent; online checks live in `gemini-mcp smoke`) ----
 if sudo -u "$APP_USER" env HOME="$UHOME" bash -c "set -a; . '$ENVF'; set +a; cd '$APP' && '$TOOL_BIN' doctor --offline"; then
   echo
   echo "SETUP OK. Daemon: http://127.0.0.1:8790 (bearer in $ENVF → GEMINI_MCP_TOKEN)."
-  echo "Next: bash $APP/scripts/smoke.sh   # first real-key run, spends ≤1 RPD"
+  echo "Next: gemini-mcp smoke   # first real-key run, spends ≤1 RPD"
 else
   echo
   echo "SETUP INCOMPLETE — doctor failed (output above). Likely cause: GEMINI_API_KEYS empty."
   echo "Fix (on the server):"
   echo "  1) echo 'GEMINI_API_KEYS=<key1,key2>' >> $ENVF   # keys from AI Studio"
   echo "  2) systemctl restart gemini-mcp && systemctl is-active gemini-mcp"
-  echo "  3) bash $APP/scripts/smoke.sh"
+  echo "  3) gemini-mcp smoke"
   echo "Note: without keys the daemon restart-loops by design (fail-fast); it recovers"
   echo "      automatically within seconds once keys are in $ENVF."
   exit 1

@@ -223,7 +223,7 @@ wheels = [
 
 [[package]]
 name = "gemini-mcp-gateway"
-version = "0.14.1"
+version = "0.15.0"
 source = { editable = "." }
 dependencies = [
     { name = "gemini-router" },
@@ -245,7 +245,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gemini-router", git = "https://github.com/vernikr/gemini-router.git?tag=v0.1.3" },
+    { name = "gemini-router", git = "https://github.com/vernikr/gemini-router.git?tag=v0.1.6" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.9" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
@@ -261,8 +261,8 @@ provides-extras = ["dev"]
 
 [[package]]
 name = "gemini-router"
-version = "0.1.3"
-source = { git = "https://github.com/vernikr/gemini-router.git?tag=v0.1.3#2523e9aadd30a0e436f2961aefa0c508158a1d74" }
+version = "0.1.6"
+source = { git = "https://github.com/vernikr/gemini-router.git?tag=v0.1.6#2f6071d5f75876880337d7b32a886a9096ba012b" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },

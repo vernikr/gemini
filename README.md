@@ -83,7 +83,7 @@ uv sync --extra dev    # dev pin: gemini-router from a git tag (tool.uv.sources)
 uv run pytest -q       # chunker, pipeline, tools/server, logging, backends, wizard —
                        # all faked, no network
 uv run ruff check src tests
-GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor
+GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor|smoke
 ```
 
 | Stage | Artifact |

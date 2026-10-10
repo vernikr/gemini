@@ -32,7 +32,7 @@ functional changes, blockers in `docs/blockers/`). Repo-specific rules:
 ## Testing
 - No network in CI: respx mocks reproduce the provider's 429/5xx payload shapes.
   Real API only via
-  `scripts/smoke.sh` on the server (budget: ≤2 RPD per run).
+  `gemini-mcp smoke` on the server (budget: ≤1 RPD per run).
 - Every FR-x from `docs/02` maps to a test; keep the mapping in test docstrings.
 
 ## Docs

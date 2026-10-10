@@ -1,4 +1,4 @@
-"""gemini-mcp CLI: serve | stdio | quota | calls | logs | prune | doctor.
+"""gemini-mcp CLI: serve | stdio | quota | calls | logs | prune | doctor | smoke.
 Terminal observability (FR-E7) works over SSH against the shared state without
 touching the daemon."""
 from __future__ import annotations
@@ -102,100 +102,78 @@ def _run_prune(app_cfg: AppCfg, router_cfg, args) -> int:
     return 0
 
 
+def _effective_cfg(app_cfg: AppCfg, router_cfg):
+    """The router config for the ledger this mode actually reads. Direct mode keeps its
+    own file under the config home, so its read-only commands must be pointed there or
+    they report on an empty default database."""
+    from .backends import direct_state_path
+    if resolve_mode(app_cfg, router_cfg) != "direct":
+        return router_cfg
+    state = direct_state_path(router_cfg)
+    Path(state).parent.mkdir(parents=True, exist_ok=True)
+    return router_cfg.model_copy(update={"state_path": state})
+
+
 def _run_quota(app_cfg: AppCfg, router_cfg, args) -> int:
-    if resolve_mode(app_cfg, router_cfg) == "router":
-        return cmd_quota(router_cfg, args)
-    router, _, _ = make_routers(app_cfg, router_cfg)     # live local ledger (0.8.1)
-    rows = router.quota_table()
-    note = f"direct mode · local ledger: {router.ledger.path}"
-    if args.json:
-        print(json.dumps({"backend": "direct", "note": note, "rows": rows},
-                         indent=1, default=str))
-        return 0
-    console.print(f"[bold cyan]Gemini quota (direct mode)[/bold cyan] — {note}")
-    for r in rows:
-        console.print(f"  {r['key_id']} {r['model']}: rpd {r['rpd_left']}/{r['rpd_limit']}"
-                      f" · rpm {r['rpm_used']}/{r['rpm_limit']}"
-                      + (f" · wait {r['wait_s']}s ({r['reason']})" if r["wait_s"] else "")
-                      + (" · [green]recommended[/green]" if r["recommended"] else ""))
-    return 0
+    return cmd_quota(args, _effective_cfg(app_cfg, router_cfg))
 
 
 def _run_calls(app_cfg: AppCfg, router_cfg, args) -> int:
-    if resolve_mode(app_cfg, router_cfg) == "router":
-        return cmd_calls(router_cfg, args)
-    router, _, _ = make_routers(app_cfg, router_cfg)     # live local audit tail
-    rows = router.ledger.calls_tail(args.n, model=args.model, status=args.status,
-                                    source=args.source, request_id=args.request_id)
-    if args.json:
-        print(json.dumps({"backend": "direct", "calls": rows}, indent=1, default=str))
-        return 0
-    if not rows:
-        console.print("[yellow]no calls recorded yet (local ledger is fresh)[/yellow]")
-        return 0
-    for r in rows:
-        console.print(f"  {r['ts_iso']} {r['source']}/{r['kind']} {r['key_id']} "
-                      f"{r['model']} → {r['status']}"
-                      + (f" http={r['http_status']}" if r.get("http_status") else "")
-                      + (f" in={r['tokens_in']} out={r['tokens_out']}"
-                         if r.get("tokens_out") is not None else ""))
-    return 0
+    return cmd_calls(args, _effective_cfg(app_cfg, router_cfg))
 
 
-def _doctor_direct(app_cfg: AppCfg, router_cfg, args) -> int:
-    """doctor for direct mode: local ledger stats + key/chain/limits probe."""
+def _run_smoke(app_cfg: AppCfg, router_cfg, args) -> int:
+    """First real-key verification: free checks, then one tiny paid call.
+
+    Budget: doctor and countTokens never spend (kind='count'); exactly one generate
+    call, so one RPD on the model the chain picks.
+    """
     import asyncio
 
-    from gemini_router import Ledger
-    from gemini_router.config import key_id
-    from gemini_router.ledger import iso, pt_midnight_ts
+    from gemini_router import RouterRequest
 
-    from .backends import direct_state_path
-    ok = True
-    console.print("[bold]gemini-router (direct mode — local ledger)[/bold]")
-    state = direct_state_path(router_cfg)
-    if Path(state).exists():
+    rc = cmd_doctor(args, _effective_cfg(app_cfg, router_cfg))
+    if rc != 0:
+        console.print("[yellow]smoke stopped: doctor failed — fix the above first[/yellow]")
+        return rc
+
+    router, _, mode = make_routers(app_cfg, router_cfg)
+
+    async def _free() -> None:
         try:
-            console.print(f"  state: {state} · {Ledger(state).stats()}")
-        except Exception as e:  # noqa: BLE001
-            console.print(f"  [red]state unusable: {e}[/red]")
-            ok = False
-    else:
-        console.print(f"  state: {state} (not created yet — no calls recorded)")
-    if router_cfg.api_keys:
-        console.print(f"  keys: {len(router_cfg.api_keys)} → "
-                      + ", ".join(key_id(k) for k in router_cfg.api_keys))
-    else:
-        console.print("  [red]no API keys configured "
-                      "(GEMINI_API_KEYS / GEMINI_API_KEY_1..10)[/red]")
-        ok = False
-    tz_now = pt_midnight_ts(router_cfg.quota_day_tz)
-    console.print(f"  quota day ({router_cfg.quota_day_tz}): resets in "
-                  f"{(pt_midnight_ts(router_cfg.quota_day_tz, days_ahead=1) - tz_now) / 3600:.1f}"
-                  f" h (midnight was {iso(tz_now)[:19]} UTC)")
-    console.print(f"  chain: {' → '.join(router_cfg.chain)}")
-    console.print(f"  limits/key×model: {router_cfg.limits_per_key_model.model_dump()} · "
-                  f"wait: {router_cfg.wait.model_dump()}")
-    if not args.offline and router_cfg.api_keys:
-        async def _probe() -> None:
-            router, _, _ = make_routers(app_cfg, router_cfg)
-            try:
-                avail = await router.availability()
-                for kid, models in avail.items():
-                    console.print(f"  {kid}: " + (f"listModels OK ({len(models)} models)"
-                                                  if models is not None
-                                                  else "[yellow]listModels failed[/yellow]"))
-            finally:
-                await router.aclose()
-        asyncio.run(_probe())
+            print("count_tokens →", await router.count_tokens("Hello world! " * 40))
+        finally:
+            await router.aclose()
+
+    console.print("\n[bold]countTokens[/bold] (free pre-flight)")
+    asyncio.run(_free())
+
+    console.print("\n[bold]one tiny generate[/bold] (spends 1 RPD; thinking low to keep "
+                  "it cheap)")
+    # No small max_output_tokens: 3.x thinking tokens count toward the cap, so a tiny
+    # cap starves the visible answer.
+    res = router.complete_sync(RouterRequest(
+        prompt="Reply with exactly one word: OK", kind="single", source="smoke",
+        thinking_level="low"))
+    console.print(f"  model={res.model} key={res.key_id} cached={res.cached} "
+                  f"in={res.tokens_in} out={res.tokens_out} thought={res.tokens_thought} "
+                  f"finish={res.finish_reason}")
+    console.print(f"  text={res.text!r}")
+
+    console.print("\n[bold]quota[/bold] (the model above must show one RPD spent)")
+    _run_quota(app_cfg, router_cfg, args)
+
+    ok = res.text.strip().upper().startswith("OK")
+    console.print(f"\n[green]SMOKE OK[/green] — backend={mode}" if ok
+                  else f"\n[red]SMOKE FAILED[/red] — the model answered "
+                       f"{res.text!r}, expected 'OK'")
     return 0 if ok else 1
 
 
 def _run_doctor(app_cfg: AppCfg, router_cfg, args) -> int:
-    mode = resolve_mode(app_cfg, router_cfg)
-    rc = (_doctor_direct(app_cfg, router_cfg, args) if mode == "direct"
-          else cmd_doctor(router_cfg, args))
-    console.print(f"[bold]gemini-mcp {__version__}[/bold] (backend={mode})")
+    rc = cmd_doctor(args, _effective_cfg(app_cfg, router_cfg))
+    console.print(f"[bold]gemini-mcp {__version__}[/bold] "
+                  f"(backend={resolve_mode(app_cfg, router_cfg)})")
     log_dir = Path(app_cfg.logging.dir)
     writable = os.access(log_dir.parent if not log_dir.exists() else log_dir, os.W_OK)
     console.print(f"  logs dir: {log_dir} (writable={writable})")
@@ -340,6 +318,10 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("prune", help="evict old logs/audit rows (retention)")
     p.add_argument("--audit-days", type=float)
     p.add_argument("--dry", action="store_true")
+    p = sub.add_parser("smoke", help="real-key end-to-end check (spends ≤1 RPD)")
+    p.add_argument("--offline", action="store_true",
+                   help="skip the live key probe in the doctor step")
+    p.add_argument("--json", action="store_true", help="print the quota table as JSON")
     p = sub.add_parser("doctor", help="router + mcp health check")
     p.add_argument("--offline", action="store_true")
 
@@ -378,6 +360,8 @@ def main(argv: list[str] | None = None) -> int:
             return _run_prune(app_cfg, router_cfg, args)
         if args.cmd == "doctor":
             return _run_doctor(app_cfg, router_cfg, args)
+        if args.cmd == "smoke":
+            return _run_smoke(app_cfg, router_cfg, args)
     except Exception as e:  # noqa: BLE001 — CLI must never traceback at the user
         console.print(f"[red]error:[/red] {redact(str(e))}")
         if "no API keys" in str(e):

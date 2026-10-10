@@ -49,7 +49,7 @@ case "$cmd" in
     ssh -t "$DEST" "sudo APP_USER=$APP_USER bash /opt/apps/gemini-mcp/scripts/setup_server.sh"
     ;;
   smoke)
-    ssh -t "$DEST" "sudo -u $APP_USER bash /opt/apps/gemini-mcp/scripts/smoke.sh"
+    ssh -t "$DEST" "sudo -u $APP_USER /home/$APP_USER/.local/bin/gemini-mcp smoke"
     ;;
   status)
     ssh -t "$DEST" "systemctl --no-pager status gemini-mcp.service | head -8; \

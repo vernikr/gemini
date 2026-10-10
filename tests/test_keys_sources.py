@@ -73,9 +73,9 @@ def test_cli_global_keys_file_feeds_quota(tmp_path, monkeypatch, capsys):
     kf = tmp_path / "keys.txt"
     kf.write_text(f"{K1}\n{K2}\n")
     rc = main(["--keys-file", str(kf), "quota", "--json"])
-    out = json.loads(capsys.readouterr().out)
-    assert rc == 0 and out["backend"] == "direct"
-    kids = {r["key_id"] for r in out["rows"]}
+    rows = json.loads(capsys.readouterr().out)          # same shape in both modes
+    assert rc == 0 and rows
+    kids = {r["key_id"] for r in rows}
     assert len(kids) == 2                               # both keys in the budget table
 
 
