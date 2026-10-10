@@ -211,3 +211,44 @@ async def test_http_app_custom_routes(tmp_path):
         q = await c.get("/v1/quota", headers={"Authorization": "Bearer tok123"})
         assert q.status_code == 200 and "rows" in q.json()
         assert (await c.post("/mcp", json={})).status_code == 401     # guarded
+
+
+async def test_rest_complete_maps_errors_to_their_own_status(tmp_path):
+    """/v1/complete must answer JSON with the status the error class deserves: only
+    quota is a 429, everything else is a request the client has to CHANGE."""
+    hdr = {"Authorization": "Bearer tok123"}
+    deps = make_deps(router=Router(real_router_cfg(tmp_path)),
+                     app_cfg=make_app_cfg(tmp_path / "logs"))
+    app = build_http_app(build_server(deps), deps.app_cfg, "tok123")
+    async with await _client(app) as c:
+        r = await c.post("/v1/complete", headers=hdr,
+                         json={"prompt": "{\\rtf1\\ansi pasted raw document"})
+        assert r.status_code == 400
+        assert r.json()["error"] == "raw_document_inlined"      # object, not a string
+        assert "analyze_file" in r.json()["fix"]
+
+        r = await c.post("/v1/complete", headers=hdr, json={})
+        assert r.status_code == 400 and r.json()["error"] == "missing_prompt"
+
+        r = await c.post("/v1/complete",
+                         headers={**hdr, "content-type": "application/json"},
+                         content=b"not json")
+        assert r.status_code == 400 and r.json()["error"] == "bad_json"
+
+    quota_deps = make_deps(router=FakeRouter(raise_quota=True),
+                           app_cfg=make_app_cfg(tmp_path / "logs2"))
+    qapp = build_http_app(build_server(quota_deps), quota_deps.app_cfg, "tok123")
+    async with await _client(qapp) as c:
+        r = await c.post("/v1/complete", headers=hdr, json={"prompt": "hi"})
+        assert r.status_code == 429 and r.json()["error"] == "quota_exhausted"
+        assert r.json()["per_model"]                            # structured payload kept
+
+
+def test_inline_doc_guard_only_looks_at_the_head():
+    """A document that merely QUOTES a container signature is legitimate text."""
+    from gemini_mcp.tools import _inline_doc_guard
+    with pytest.raises(ToolError):
+        _inline_doc_guard("{\\rtf1\\ansi leading signature", "body")
+    quoted = "Notes on file formats.\n\n" + ("filler. " * 900) \
+        + "\nA PDF starts with the bytes %PDF-1.7 and an OOXML file with PK."
+    _inline_doc_guard(quoted, "body")                           # must not raise

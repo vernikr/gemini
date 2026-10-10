@@ -28,7 +28,6 @@ def _deps(app_cfg: AppCfg, router_cfg) -> Deps:
     logger = setup_logging(app_cfg.logging,
                            secrets=[os.environ.get("GEMINI_MCP_TOKEN", "")])
     router, router_optimal, mode = make_routers(app_cfg, router_cfg)
-    app_cfg.backend_resolved = mode
     audit = AuditLogger(app_cfg.logging,
                         secrets=[os.environ.get("GEMINI_MCP_TOKEN", "")])
     return Deps(router=router, app_cfg=app_cfg, audit=audit, logger=logger,

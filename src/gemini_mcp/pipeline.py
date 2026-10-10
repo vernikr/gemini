@@ -3,6 +3,7 @@ fail-fast) → chunk loop with 'CHUNK N/M' markers → recursive consolidation �
 result + meta. All spends go through the router (shared ledger)."""
 from __future__ import annotations
 
+import asyncio
 import time
 from dataclasses import dataclass
 
@@ -144,7 +145,10 @@ class Pipeline:
         cpt = max(1.0, len(body) / max(1, measured))            # real chars/token
         max_chars = max(1, int(chunk_tokens * cpt))
         overlap_chars = int(max_chars * ratio)
-        chunks = split_text(body, max_chars, overlap_chars, cfgp.merge_tail_ratio)
+        # off the event loop: segmenting a multi-MB body is a second of pure CPU during
+        # which the daemon could not answer healthz, keep-alives or any other client
+        chunks = await asyncio.to_thread(split_text, body, max_chars, overlap_chars,
+                                         cfgp.merge_tail_ratio)
         m = len(chunks)
         planned = plan_chunks(measured, chunk_tokens, ratio)
         cost = m + 1
@@ -199,15 +203,14 @@ class Pipeline:
         return text, chunks_meta
 
     def _available_rpd(self, p: AnalyzeParams) -> int:
+        cfg = self.router.cfg
         available = sum(b["rpd_left"] for b in self.router.model_budgets())
         if p.overflow in ("lite", "lite+gemma"):
-            tiers = [t for t in getattr(self.router.cfg, "overflow_tiers", [])
-                     if t != "gemma-auto"]
+            tiers = [t for t in cfg.overflow_tiers if t != "gemma-auto"]
             if tiers:
                 available += sum(b["rpd_left"] for b in self.router.model_budgets(tiers))
             if p.overflow == "lite+gemma":
-                limits = getattr(self.router.cfg, "overflow_limits", None)
-                available += getattr(limits, "rpd", 500)         # gemma-auto is unpinned
+                available += cfg.overflow_limits.rpd             # gemma-auto is unpinned
         return available
 
     async def _consolidate(self, p: AnalyzeParams, answers: dict[int, str],

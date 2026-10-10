@@ -9,14 +9,14 @@ a compact consolidated result — the agent's own context stays clean.
   ledger shared with `external-consumer`).
 - Over-limit bodies: split into overlapping chunks, each marked `[CHUNK N/M]`, analyzed
   separately, then consolidated (recursively if needed).
-- `thinking_level` default **high**, per-request override; opt-in overflow
+- `thinking_level` default **medium**, per-request override; opt-in overflow
   (`flash-lite → gemma`) when the daily quota is gone; hard stop otherwise; per-request
   wait policy for minute-limit resets (default: wait, countdown reported in progress).
 - Deep progress to the caller (MCP progress + logging notifications + embedded trace),
   rotating disk logs, `gemini-mcp quota|logs|calls|doctor` in the terminal.
 - Transports: SSH-stdio (primary) and streamable HTTP daemon (`127.0.0.1`, bearer).
-- **Dual backend (0.8.0)**: `router` (fleet: shared SQLite ledger on the VPS) or
-  `direct` (plain Google AI Studio: same engine, in-memory counters, no server at all).
+- **Dual backend**: `router` (fleet: shared SQLite ledger on the VPS) or `direct`
+  (plain Google AI Studio: same engine, a local persistent ledger, no server at all).
   `backend: auto` picks router only when persistent state exists; env
   `GEMINI_MCP_BACKEND` overrides. See [`docs/08-dual-mode.md`](docs/08-dual-mode.md).
 
@@ -75,22 +75,13 @@ daemon + `backend: router`). Every response says `backend=direct` in its `report
 `gemini-mcp uninstall --yes` removes keys, config and ledger together. The npm shim
 `@vernikr/gemini-mcp` (pnpm-first install) ships the same core at the same version.
 
-## Status
-
-**v0.8.0 — published consumer package.** Fleet side (VPS daemon 0.6.x, SSH-stdio +
-HTTP tunnel) runs in production; consumer side ships as PyPI `gemini-mcp-gateway`
-(+ npm shim `@vernikr/gemini-mcp`) with the dual-mode backend (`router`/`direct`,
-docs/08) and the `setup` wizard (M7.2). Router core: `gemini-router` 0.1.1 on PyPI.
-80 tests green, no network needed (respx/fakes only).
-Next: M7.3 dual-publish CI, M7.4 clean-machine beta.
-
 ## Development
 
 ```bash
-uv sync --extra dev    # dev pin: gemini-router from git tag (tool.uv.sources);
-                       # published metadata uses the PyPI version range — no auth needed
-uv run pytest -q       # 80 tests: chunker, pipeline, tools/server, logging, direct
-                       # backend (respx), setup wizard — all faked, no network
+uv sync --extra dev    # dev pin: gemini-router from a git tag (tool.uv.sources);
+                       # published metadata uses the PyPI range — no auth needed
+uv run pytest -q       # chunker, pipeline, tools/server, logging, backends, wizard —
+                       # all faked, no network
 uv run ruff check src tests
 GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor
 ```
@@ -111,7 +102,7 @@ GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor
 { "mcpServers": {
     "gemini": {                       // A) SSH-stdio — primary, encrypted, no open ports
       "command": "ssh",
-      "args": ["root@YOUR_VPS_HOST", "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"] },
+      "args": ["root@YOUR_VPS_HOST", "~/.local/bin/gemini-mcp", "stdio"] },
     "gemini-http": {                  // B) HTTP via `ssh -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST`
       "type": "http", "url": "http://127.0.0.1:8790/mcp",
       "headers": { "Authorization": "Bearer $GEMINI_MCP_TOKEN" } } } }
@@ -142,8 +133,8 @@ Freebuff Desktop wiring (SSH-stdio and HTTP-via-tunnel snippets, verification st
 ```bash
 ssh root@YOUR_VPS_HOST
 sudo systemctl status gemini-mcp          # daemon (HTTP)
-/opt/apps/gemini-mcp/.venv/bin/gemini-mcp quota    # what's left, per key×model
-/opt/apps/gemini-mcp/.venv/bin/gemini-mcp logs -f  # live app log
+~/.local/bin/gemini-mcp quota    # what's left, per key×model (on the VPS, as its user)
+~/.local/bin/gemini-mcp logs -f  # live app log
 ```
 
 Conventions: English in files, Conventional Commits, SemVer, docs updated with every

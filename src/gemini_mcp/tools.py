@@ -7,6 +7,7 @@ spend · rough edges) — clients truncate tool DESCRIPTIONS, so the reporting r
 travels inside the payload itself (postmortem-driven, v0.5.0)."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -124,20 +125,20 @@ def _fail(deps: Deps, emitter: ProgressEmitter, tool: str, request_id: str | Non
 
 
 _DOC_MARKERS = (("{\\rtf1", "RTF"), ("%PDF-", "PDF"), ("PK\x03\x04", "DOCX/XLSX (zip)"))
+# Container signatures only ever sit at offset 0; scanning the whole field would reject
+# legitimate text that merely quotes one (a document ABOUT the PDF format, say).
+_DOC_HEAD_CHARS = 4096
 
 
 def _inline_doc_guard(text: str | None, field: str) -> None:
-    """Fail fast when an agent inlines a raw document into a text tool.
-
-    Observed in the wild (Solar Pro 4, 2026-10-10): instead of the M4.5 ingest
-    flow the agent pasted an 840 KB RTF into the prompt — unreadable for the
-    model (Cyrillic survives as \\'hex escapes) and a context bomb for the
-    client. Detect the format markers and answer with the exact alternative.
-    """
+    """Fail fast when an agent inlines a raw document into a text tool: the markup is
+    unreadable for the model (non-ASCII survives as hex escapes) and a context bomb for
+    the client. Detect the leading format signature and answer with the file flow."""
     if not text:
         return
+    head = text[:_DOC_HEAD_CHARS]
     for marker, kind in _DOC_MARKERS:
-        if marker in text:
+        if marker in head:
             raise ToolError(json.dumps({
                 "error": "raw_document_inlined",
                 "detected": kind,
@@ -223,7 +224,8 @@ async def file_upload_ticket_tool(deps: Deps, filename: str, size_bytes: int) ->
                                     "max_bytes": max_bytes}))
     token = os.environ.get("GEMINI_MCP_TOKEN", "")
     inbox = Path(cfg.ingest.dir)
-    ingest.prune(inbox, cfg.ingest.keep_hours, cfg.ingest.total_cap_mb)
+    await asyncio.to_thread(ingest.prune, inbox, cfg.ingest.keep_hours,
+                            cfg.ingest.total_cap_mb)
     upload_id, exp = ingest.issue_ticket(token, cfg.ingest.ticket_ttl_s)
     ingest.reserve(inbox, upload_id, filename, size_bytes)
     sig = ingest.make_ticket(token, upload_id, exp, size_bytes)
@@ -246,6 +248,32 @@ async def file_upload_ticket_tool(deps: Deps, filename: str, size_bytes: int) ->
     return out
 
 
+def _load_and_extract(inbox: Path, upload_id: str, cfgi) -> tuple[dict, int, str, str, str]:
+    """Blocking half of analyze_file, run in a worker thread: pandoc is a subprocess and
+    the RTF fallback is pure-Python parsing, either of which would freeze the whole
+    daemon (healthz, keep-alives, every other client) for the duration.
+
+    Returns the byte COUNT, not the bytes — the blob is freed as soon as text exists."""
+    side = ingest.load_sidecar(inbox, upload_id)
+    path = inbox / upload_id
+    if not path.exists():
+        raise ingest.IngestError("upload_not_found", upload_id=upload_id,
+                                 hint="ticket reserved but bytes never arrived — "
+                                      "run the curl/scp upload from the ticket")
+    data = path.read_bytes()
+    reason = ingest.sniff_binary(data, side.get("filename", ""), cfgi.use_pandoc)
+    if reason:
+        raise ingest.IngestError(
+            "binary_file_needs_conversion", reason=reason,
+            filename=side.get("filename"), bytes=len(data),
+            hint="server-side converters (docx/pdf/zip) are deferred; NOTHING was "
+                 "sent to any model (zero quota spent). Upload .txt/.md/.csv/.rtf "
+                 "(RTF is extracted server-side) or convert first.")
+    text, enc, extractor = ingest.extract_text(
+        data, side.get("filename", ""), cfgi.use_pandoc, cfgi.pandoc_timeout_s)
+    return side, len(data), text, enc, extractor
+
+
 async def analyze_file_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
     """Server-side file analysis (D11): load inbox blob → sniff (binary → fail-fast,
     ZERO spend) → extract text (RTF server-side) → full analyze_large pipeline."""
@@ -253,40 +281,25 @@ async def analyze_file_tool(deps: Deps, emitter: ProgressEmitter, params: dict) 
     inbox = Path(cfgi.dir)
     upload_id = params["upload_id"]
     try:
-        side = ingest.load_sidecar(inbox, upload_id)
-        path = inbox / upload_id
-        if not path.exists():
-            raise ingest.IngestError("upload_not_found", upload_id=upload_id,
-                                     hint="ticket reserved but bytes never arrived — "
-                                          "run the curl/scp upload from the ticket")
-        data = path.read_bytes()
-        reason = ingest.sniff_binary(data, side.get("filename", ""), cfgi.use_pandoc)
-        if reason:
-            raise ingest.IngestError(
-                "binary_file_needs_conversion", reason=reason,
-                filename=side.get("filename"), bytes=len(data),
-                hint="server-side converters (docx/pdf/zip) are deferred; NOTHING was "
-                     "sent to any model (zero quota spent). Upload .txt/.md/.csv/.rtf "
-                     "(RTF is extracted server-side) or convert first.")
-        text, enc, extractor = ingest.extract_text(
-            data, side.get("filename", ""), cfgi.use_pandoc, cfgi.pandoc_timeout_s)
+        side, nbytes, text, enc, extractor = await asyncio.to_thread(
+            _load_and_extract, inbox, upload_id, cfgi)
     except ingest.IngestError as e:
         deps.audit.record({"ts": time.time(), "tool": "analyze_file",
                            "upload_id": upload_id, "error": e.payload["error"]})
         raise ToolError(json.dumps(e.payload, ensure_ascii=False)) from e
     await emitter.stage("file_loaded", 1,
-                        f"{side.get('filename')}: {len(data)} bytes → {len(text)} "
+                        f"{side.get('filename')}: {nbytes} bytes → {len(text)} "
                         f"chars ({extractor}/{enc})")
     sub = {k: v for k, v in params.items() if k != "upload_id"}
     sub["body"] = text
     out = await analyze_large_tool(deps, emitter, sub)
-    out["meta"]["file"] = {"filename": side.get("filename"), "bytes": len(data),
+    out["meta"]["file"] = {"filename": side.get("filename"), "bytes": nbytes,
                            "chars": len(text), "encoding": enc, "extractor": extractor}
     out["report"] = (f"file={side.get('filename')} ({len(text)} chars via "
                      f"{extractor}) · {out['report']}")
     deps.audit.record({"ts": time.time(), "tool": "analyze_file",
                        "upload_id": upload_id, "filename": side.get("filename"),
-                       "bytes": len(data), "chars": len(text), "extractor": extractor})
+                       "bytes": nbytes, "chars": len(text), "extractor": extractor})
     return out
 
 

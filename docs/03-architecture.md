@@ -99,29 +99,32 @@ gemini-mcp/
 ## 3. Ledger schema (SQLite, WAL, `busy_timeout=5000`)
 
 ```sql
+-- The executable definition is gemini-router `src/gemini_router/ledger.py` SCHEMA.
 CREATE TABLE calls(              -- one row per Gemini attempt (incl. failures)
-  id INTEGER PRIMARY KEY, ts REAL NOT NULL, ts_iso TEXT NOT NULL,  -- unix epoch + UTC ISO (human)
-  request_id TEXT, source TEXT NOT NULL,             -- mcp|cli|rest|tldr
-  kind TEXT NOT NULL,                                -- single|chunk|consolidate|count
-  key_id TEXT NOT NULL, model TEXT NOT NULL,         -- key_id = sha256(key)[:8]
-  status TEXT NOT NULL,                              -- ok|quota|http4xx|http5xx|network
+  id INTEGER PRIMARY KEY, ts REAL NOT NULL, ts_iso TEXT NOT NULL,  -- unix epoch + UTC ISO
+  request_id TEXT, source TEXT NOT NULL DEFAULT 'cli',  -- mcp|cli|rest|tldr|count|smoke
+  kind TEXT NOT NULL DEFAULT 'single',                  -- single|chunk|consolidate|count
+  key_id TEXT NOT NULL, model TEXT NOT NULL,            -- key_id = sha256(key)[:8]
+  status TEXT NOT NULL,   -- planned|ok|quota|http4xx|http5xx|network|blocked|skipped
   http_status INTEGER, tokens_in INTEGER, tokens_out INTEGER,
-  quota_error TEXT, retry_after_s REAL, latency_ms INTEGER, overflow_tier INTEGER DEFAULT 0);
+  quota_error TEXT, retry_after_s REAL, latency_ms INTEGER,
+  overflow_tier INTEGER NOT NULL DEFAULT 0);
 CREATE INDEX idx_calls_model_ts ON calls(model, ts);
+CREATE INDEX idx_calls_key_model_ts ON calls(key_id, model, ts);
 CREATE INDEX idx_calls_req ON calls(request_id);
 
-CREATE TABLE cooldowns(key_id TEXT, model TEXT, until_ts TEXT, reason TEXT,
-  PRIMARY KEY(key_id, model));
-CREATE TABLE cache(hash TEXT PRIMARY KEY, model TEXT, ts TEXT, response TEXT,
-  tokens_in INTEGER, tokens_out INTEGER, request_id TEXT);
-CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);       -- schema_version, day boundaries, etc.
+CREATE TABLE cooldowns(key_id TEXT NOT NULL, model TEXT NOT NULL, until_ts REAL NOT NULL,
+  reason TEXT, PRIMARY KEY(key_id, model));
+CREATE TABLE cache(hash TEXT PRIMARY KEY, request_id TEXT, model TEXT NOT NULL,
+  ts REAL NOT NULL, response TEXT NOT NULL, tokens_in INTEGER, tokens_out INTEGER);
+CREATE TABLE meta(k TEXT PRIMARY KEY, v TEXT);       -- schema_version
 ```
 
 Budget queries (single source of truth, no in-memory counters that can drift):
-- RPD left = `rpd − count(calls WHERE model,key_id, status IN ('ok','quota','http5xx')
-  AND ts ≥ pt_midnight)`; rolling-24h count as a second gate. Conservative rule: 429s
-  count as spent (Google bills the attempt); pure client-validation 4xx and network
-  errors do not.
+- RPD left = `rpd − count(calls WHERE model,key_id, status IN
+  ('ok','quota','http5xx','blocked') AND ts ≥ pt_midnight)`; rolling-24h count as a
+  second gate. Conservative rule: 429s count as spent (Google bills the attempt); pure
+  client-validation 4xx and network errors do not. `kind='count'` never counts.
 - RPM/TPM windows = same table, `ts ≥ now−60s` (TPM uses `tokens_in`; pre-flight adds
   the planned request's countTokens estimate as a pending row with status='planned',
   upgraded to real status after the call — prevents burst races between processes).
@@ -183,11 +186,11 @@ offset, RAM). Same tables exposed by MCP `quota_status`/`router_logs` and REST `
 ├── config.yaml · src/ · scripts/ · prompts inline
 └── logs/                      # app.log*, requests-*.jsonl
 /opt/apps/shared/gemini-router/state.db   # GEMINI_ROUTER_STATE (dir chmod 770, db 660)
-/etc/systemd/system/gemini-mcp.service    # ExecStart=.venv/bin/gemini-mcp serve --http
+/etc/systemd/system/gemini-mcp.service    # ExecStart=~/.local/bin/gemini-mcp serve
                                           # MemoryMax=350M, Restart=on-failure, EnvironmentFile=.env
 ```
 
-- Stdio sessions (path A): `ssh root@YOUR_VPS_HOST '/opt/apps/gemini-mcp/.venv/bin/gemini-mcp stdio'`
+- Stdio sessions (path A): `ssh root@YOUR_VPS_HOST '~/.local/bin/gemini-mcp stdio'`
   — no unit needed; optional sshd slice drop-in caps session RAM (documented, off by default).
 - Ports: only `127.0.0.1:8790` (daemon). **No ufw changes** (loopback isn't filtered);
   443/20724/22 untouched; external-service untouched.
@@ -201,7 +204,7 @@ Freebuff wiring (`~/.agents/mcp.json`, home-level per bug #957):
 { "mcpServers": {
     "gemini": {                       // A) SSH-stdio (primary)
       "command": "ssh",
-      "args": ["root@YOUR_VPS_HOST", "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"] },
+      "args": ["root@YOUR_VPS_HOST", "~/.local/bin/gemini-mcp", "stdio"] },
     "gemini-http": {                  // B) HTTP via pre-opened local tunnel
       "type": "http", "url": "http://127.0.0.1:8790/mcp",
       "headers": { "Authorization": "Bearer $GEMINI_MCP_TOKEN" } } } }

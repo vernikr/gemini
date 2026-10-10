@@ -71,8 +71,7 @@ class AppCfg(BaseModel):
     thinking: ThinkingCfg = Field(default_factory=ThinkingCfg)
     routing: RoutingCfg = Field(default_factory=RoutingCfg)
     ingest: IngestCfg = Field(default_factory=IngestCfg)
-    backend: str = "auto"                    # auto|direct|router (backends.py; 0.8.0)
-    backend_resolved: str = ""               # filled at startup; shown in healthz/meta
+    backend: str = "auto"                    # auto|direct|router (backends.py)
 
 
 def parse_keys(text: str) -> list[str]:

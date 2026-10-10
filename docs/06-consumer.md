@@ -14,10 +14,9 @@ uvx --from gemini-mcp-gateway gemini-mcp setup   # pure Python toolchain
 ```
 
 The wizard: fleet-vs-simple question (pick **1 Simple**) → key intake — masked paste,
-read from a file, or skip (0.10.1: the hidden-paste path is guarded because toggling
-tty echo crashed macOS Terminal.app 2.14; the file option never touches tty modes.
-Get keys free at https://aistudio.google.com/app/apikey, several keys = several times
-the quota) → live listModels probe → writes `~/.config/gemini-mcp/`:
+read from a file, or skip. The hidden-paste path is guarded because toggling tty echo
+can crash macOS Terminal.app; the file option never touches tty modes. Get keys free at
+https://aistudio.google.com/app/apikey — several keys = several times the quota → live listModels probe → writes `~/.config/gemini-mcp/`:
 
 | File | Contents |
 |---|---|
@@ -32,7 +31,7 @@ Undo everything: `… uninstall --yes`.
 
 ## 2. Add to your MCP client (JSON)
 
-`setup` **prints** the JSON block and, since 0.11.0, can also **write** it itself:
+`setup` **prints** the JSON block and can also **write** it itself:
 `--write-client freebuff|claude|cursor` (repeatable) merges the `gemini` entry into
 that client's config with a timestamped `.bak` backup; a broken existing JSON is
 never clobbered — you get a `fix` instead. The printout is mode-aware: direct mode
@@ -113,7 +112,7 @@ The gateway auto-discovers `~/.config/gemini-mcp/` — **no other env vars neede
   "mcpServers": {
     "gemini": {
       "command": "uvx",
-      "args": ["--from", "gemini-mcp-gateway==0.8.1", "gemini-mcp", "stdio"]
+      "args": ["--from", "gemini-mcp-gateway", "gemini-mcp", "stdio"]
     }
   }
 }
@@ -124,7 +123,7 @@ one-time uv resolve (~10–20 s), then it's cached.
 
 ### Fleet mode instead (you DO have a server)
 
-The wizard does the whole server side (0.10.0+). Answer its questions (or pass flags):
+The wizard does the whole server side. Answer its questions (or pass flags):
 
 ```bash
 gemini-mcp setup --backend router --vps-host <ip> \
@@ -184,8 +183,7 @@ File flow (for the agent — also returned by `quota_status` in the `file_flow` 
 `upload_url` → 3) `analyze_file(upload_id, task)`. The server extracts clean text
 (pandoc), chunks if needed and spends quota atomically. Pasting raw file contents into
 `gemini_generate`/`analyze_large` is rejected (`raw_document_inlined`): markup like RTF
-is unreadable for the model (non-ASCII text survives as hex escapes) — guardrail added
-in 0.12.0 after a real agent failure.
+is unreadable for the model (non-ASCII text survives as hex escapes).
 
 Terminal (no client needed):
 

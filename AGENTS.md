@@ -14,10 +14,13 @@ functional changes, blockers in `docs/blockers/`). Repo-specific rules:
   22/443/20724 in ufw; units get `MemoryMax=350M`; install via `uv` `--no-cache` into
   `/opt/apps/gemini-mcp/.venv` (PEP 668 — no global pip).
 
-## Commands (as-built; update me)
+## Commands
 - `uv sync` · `uv run pytest` · `uv run ruff check src tests`
-- `uv run gemini-mcp stdio` / `serve --http` / `quota` / `logs -f` / `calls` / `doctor`
-- Deploy (user's workstation): `bash scripts/run_remote.sh --setup|--deploy`
+- `uv run gemini-mcp stdio` / `serve [--bind --port]` / `setup` / `uninstall` /
+  `quota` / `calls` / `logs [-f]` / `prune` / `doctor`
+- Deploy (user's workstation): `bash scripts/run_remote.sh setup|deploy|smoke|status|logs`
+- On the VPS the daemon runs the `uv tool` binary `~/.local/bin/gemini-mcp`, NOT a
+  project `.venv` — docs and client snippets must use that path.
 
 ## Secrets
 - Never commit `.env`, keys, tokens, real request bodies. `key_id = sha256[:8]` only.
@@ -28,3 +31,10 @@ functional changes, blockers in `docs/blockers/`). Repo-specific rules:
 - No network in CI: respx mocks shaped per `docs/01` §3.1. Real API only via
   `scripts/smoke.sh` on the server (budget: ≤2 RPD per run).
 - Every FR-x from `docs/02` maps to a test; keep the mapping in test docstrings.
+
+## Docs
+- No counters in evergreen docs: no version numbers, dates, test counts or "N green"
+  claims. They go stale silently and each one is a fact somebody must guard. Keep only
+  what a reader cannot get from `pyproject.toml`, `--version` or `pytest`.
+- The two release-workflow lockstep guards (pyproject version == tag, npm version == tag)
+  stay: they protect a real cross-artifact invariant, not a documentation claim.

@@ -11,14 +11,14 @@ unreliably — Freebuff bug #957); fully restart Freebuff after editing.
     "gemini": {
       "command": "ssh",
       "args": ["root@YOUR_VPS_HOST",
-               "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"]
+               "~/.local/bin/gemini-mcp", "stdio"]
     } } }
 ```
 
 Requirements: key-based SSH from the workstation (`ssh-copy-id root@YOUR_VPS_HOST`).
 No token needed — the transport is SSH. Each Freebuff session spawns its own process;
 all sessions share `/opt/apps/shared/gemini-router/state.db`, so RPD/RPM accounting
-stays global. Since v0.2.1 the process bootstraps itself: it anchors to the project
+stays global. The process bootstraps itself: it anchors to the project
 root (`/opt/apps/gemini-mcp`) and loads its `.env` (keys, state path) — no wrapper
 commands or env plumbing in the MCP config needed.
 
@@ -79,7 +79,7 @@ prints once), then the pipe above + the python mcp.json rewrite. SSH hardening
 3. On the server: `bash scripts/run_remote.sh logs` → JSONL audit row with
    `source=mcp`, and `journalctl -u gemini-mcp -n 20`.
 
-**Long calls are timeout-safe (v0.3.0).** Clients cut MCP calls after ~30–60s
+**Long calls are timeout-safe.** Clients cut MCP calls after ~30–60s
 (Freebuff did exactly that to a thinking-heavy `analyze_large`), so both compute tools
 hold the call inline only `wait_seconds` (default 25). A longer job returns
 `{status:"running", request_id}` and keeps computing server-side; the agent then calls
@@ -124,7 +124,7 @@ with `binary_file_needs_conversion` and ZERO quota spent (PDF converter deferred
 candidate: pymupdf4llm). Inbox retention: `keep_hours` (default 24) +
 `total_cap_mb` (default 500), pruned on each ticket issuance.
 
-**Routes (v0.4.0).** `route:"optimal"` (default) tries models in empirical
+**Routes.** `route:"optimal"` (default) tries models in empirical
 availability order 3.6 → 3.5 → 3-preview → 3.8 → 3.7 (older = less loaded on the
 free tier) and auto-overflows to flash-lite/gemma when Flash budgets run out.
 `route:"best_available"` is the legacy newest-first chain with opt-in overflow
@@ -144,10 +144,10 @@ waits, failed chunks.
   /opt/apps/gemini-mcp/.env | cut -d= -f2 | tr -d "\n"' | pbcopy) or rewrite mcp.json
   programmatically. The `mcp-remote` bridge remains the recommended Freebuff entry
   (proven in sandbox); native `type: http` is equally fine once the token is exact.
-  Server-side hardening shipped anyway (v0.2.2–v0.2.4): `WWW-Authenticate: Bearer` on
+  Server-side hardening shipped anyway: `WWW-Authenticate: Bearer` on
   401, RFC 9728 metadata, JSON (never text/plain) on every `/.well-known/*` and OAuth
   rung — discovery can no longer crash any client's parser.
-  Server-side hardening shipped anyway (v0.2.2/v0.2.3): `WWW-Authenticate: Bearer` on
+  Server-side hardening shipped anyway: `WWW-Authenticate: Bearer` on
   401, RFC 9728 metadata on `/.well-known/oauth-protected-resource[/mcp]`, and JSON
   (never text/plain) on every other `/.well-known/*` path — no client can crash on
   discovery anymore. Native `type: http` remains the right choice for well-behaved

@@ -67,6 +67,33 @@ tunnel; the signed URL IS the auth, or scp <file> <scp_path> without the tunnel)
 analyze_file(task, upload_id, …). The server extracts text itself (RTF supported
 server-side); binaries fail fast with ZERO quota spent."""
 
+# ToolError payload code → HTTP status. Quota is the only 429: every other code is a
+# request the client must CHANGE, not retry — answering 429 there sends it into a
+# pointless retry loop.
+_TOOL_ERROR_STATUS = {"quota_exhausted": 429, "plan_budget_insufficient": 429,
+                      "raw_document_inlined": 400, "bad_size": 400, "bad_ticket": 400,
+                      "file_too_large": 413, "upload_not_found": 404,
+                      "binary_file_needs_conversion": 415, "conversion_unavailable": 415,
+                      "ticket_expired": 410, "already_uploaded": 409,
+                      "bad_signature": 403, "ingest_disabled": 503}
+
+
+def _json(obj) -> JSONResponse:
+    """JSONResponse tolerant of the non-JSON-native values meta carries."""
+    return JSONResponse(json.loads(json.dumps(obj, default=str)))
+
+
+def _tool_error_response(e: Exception) -> JSONResponse:
+    """Structured JSON for a ToolError: the payload object itself, not a stringified
+    copy of it, under the status its error code deserves."""
+    raw = str(e)
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return JSONResponse({"error": "tool_error", "detail": raw[:500]}, status_code=400)
+    code = payload.get("error") if isinstance(payload, dict) else None
+    return JSONResponse(payload, status_code=_TOOL_ERROR_STATUS.get(code, 400))
+
 
 def build_server(deps: Deps) -> MCPServer:
     srv = MCPServer("gemini", instructions=INSTRUCTIONS)
@@ -289,19 +316,32 @@ def build_server(deps: Deps) -> MCPServer:
 
     @srv.custom_route("/v1/quota", methods=["GET"])
     async def v1_quota(request: Request) -> JSONResponse:
-        return JSONResponse(json.loads(json.dumps(await quota_status_tool(deps),
-                                                  default=str)))
+        return _json(await quota_status_tool(deps))
 
     @srv.custom_route("/v1/complete", methods=["POST"])
     async def v1_complete(request: Request) -> JSONResponse:
-        data = await request.json()
-        emitter = ProgressEmitter(None, deps.logger)
+        """REST twin of gemini_generate. Every failure is JSON with the status its error
+        class deserves — a machine client must never have to parse a traceback."""
         from mcp.server.mcpserver.exceptions import ToolError
         try:
-            out = await gemini_generate_tool(deps, emitter, data)
+            data = await request.json()
+        except Exception:  # noqa: BLE001 — a non-JSON body is the client's error, not a 500
+            return JSONResponse({"error": "bad_json",
+                                 "hint": "send a JSON object with at least 'prompt'"},
+                                status_code=400)
+        if not isinstance(data, dict) or not data.get("prompt"):
+            return JSONResponse({"error": "missing_prompt",
+                                 "hint": "body must be {\"prompt\": \"…\", …}"},
+                                status_code=400)
+        try:
+            out = await gemini_generate_tool(deps, ProgressEmitter(None, deps.logger), data)
         except ToolError as e:
-            return JSONResponse({"error": str(e)}, status_code=429)
-        return JSONResponse(json.loads(json.dumps(out, default=str)))
+            return _tool_error_response(e)
+        except Exception as e:  # noqa: BLE001 — never leak a traceback as text/plain
+            deps.logger.exception("v1/complete failed")
+            return JSONResponse({"error": "internal", "detail": str(e)[:300]},
+                                status_code=500)
+        return _json(out)
 
     @srv.custom_route("/v1/upload/{upload_id}", methods=["PUT", "POST"])
     async def upload(request: Request) -> JSONResponse:
