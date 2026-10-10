@@ -65,7 +65,23 @@ FILE INGEST: to analyze a local file — file_upload_ticket(filename, size_bytes
 upload the bytes with ONE command (curl -T <file> '<upload_url>' through the :8790
 tunnel; the signed URL IS the auth, or scp <file> <scp_path> without the tunnel) →
 analyze_file(task, upload_id, …). The server extracts text itself (RTF supported
-server-side); binaries fail fast with ZERO quota spent."""
+server-side); binaries fail fast with ZERO quota spent.
+
+SIZE DISCIPLINE — 20 MB per upload. That is a memory limit, not a policy: the server
+holds the extracted text in RAM while chunking, so an oversized file can push the
+service past its memory allowance and kill every job in flight, not just yours. When
+what you need to send adds up to more, work down this list:
+ 1. Shrink it locally — re-save as plain text or Markdown. RTF and DOCX carry markup
+    that often outweighs the words and a .txt/.md export reads just as well. Archives
+    are NOT accepted.
+ 2. Split it — several uploads and several analyze_file calls, then combine the
+    answers yourself. Each call is charged separately; say so in your report.
+ 3. Only if neither works, ask the user for explicit permission to exceed the cap and
+    tell them plainly the service may be killed mid-job, taking other work with it.
+    If they agree, retry with override_size_limit=true. The server refuses that flag
+    unless its owner enabled ingest.allow_oversize — it is never your call.
+Do not paste a large file into 'body' to get around this: analyze_large rejects raw
+documents, and a huge paste costs the same memory without the ticket's protections."""
 
 # ToolError payload code → HTTP status. Quota is the only 429: every other code is a
 # request the client must CHANGE, not retry — answering 429 there sends it into a
@@ -229,6 +245,7 @@ def build_server(deps: Deps) -> MCPServer:
     async def file_upload_ticket(
         filename: str,
         size_bytes: int,
+        override_size_limit: bool = False,
         ctx: Context | None = None,
     ) -> dict:
         """Reserve a file upload (step 1 of 2 — transport details are in FILE INGEST
@@ -237,8 +254,12 @@ def build_server(deps: Deps) -> MCPServer:
 
         ANY file can be uploaded; the SERVER decides split/convert: text-like files are
         analyzed, RTF is extracted server-side, binaries fail fast with zero quota
-        spent."""
-        return await file_upload_ticket_tool(deps, filename, size_bytes)
+        spent.
+
+        override_size_limit: only after the user has explicitly accepted the risk, and
+        only when the server permits it. See FILE INGEST for what to try first."""
+        return await file_upload_ticket_tool(deps, filename, size_bytes,
+                                             override_size_limit)
 
     @srv.tool()
     async def analyze_file(
@@ -355,24 +376,28 @@ def build_server(deps: Deps) -> MCPServer:
             limit = cfgi.max_file_mb * 1_048_576
             # The signature binds the upload to its declared size, so that size is the
             # cap — checked BEFORE buffering, or an oversized body could consume the
-            # whole memory budget before any check ran.
+            # whole memory budget before any check ran. With the owner's escape hatch
+            # on, the ticket itself is the authority: the ticket tool already refused
+            # anything it was not allowed to issue.
             declared = int(q["size"])
+            cap = declared if cfgi.allow_oversize else min(declared, limit)
             over = (request.headers.get("content-length") or "").isdigit() \
-                and int(request.headers["content-length"]) > declared
-            if over or declared > limit:
+                and int(request.headers["content-length"]) > cap
+            if over or declared > cap:
                 raise IngestError("file_too_large",
                                   bytes=int(request.headers.get("content-length",
                                                                 declared)),
-                                  max_bytes=min(declared, limit))
+                                  max_bytes=cap)
             data = await request.body()
             if len(data) != declared:      # chunked or lying Content-Length
                 raise IngestError("size_mismatch", bytes=len(data), expected=declared,
                                   hint="body must match the size the ticket was issued "
                                        "for; issue a fresh file_upload_ticket")
-            path = save_upload(Path(cfgi.dir), uid, data, limit)
+            path = save_upload(Path(cfgi.dir), uid, data, cap)
         except IngestError as e:
             code = {"ticket_expired": 410, "already_uploaded": 409,
                     "file_too_large": 413, "size_mismatch": 413,
+                    "oversize_not_permitted": 403,
                     "ingest_disabled": 503}.get(e.payload["error"], 400)
             return JSONResponse(e.payload, status_code=code)
         deps.logger.info("ingest: stored %s (%d bytes)", uid, path.stat().st_size)

@@ -289,8 +289,13 @@ Flow:
    (ZERO RPD spend), else the existing pipeline chunks/consolidates it.
    `meta.file = {filename, bytes, chars, encoding}`.
 4. Retention: inbox purged after analysis by default (`keep_hours` config),
-   `max_file_mb` cap (50 default), total-inbox cap; cleanup piggybacks the
-   existing retention prune (§5).
+   `max_file_mb` cap, total-inbox cap; cleanup piggybacks the existing retention
+   prune (§5). The per-file cap is a memory guard, not a policy — the pipeline holds
+   the extracted text in RAM while chunking, so it is sized against `MemoryMax`
+   rather than against what the provider would accept. `ingest.allow_oversize` lets
+   the owner lift it; while it is on, an agent may issue an oversized ticket with
+   `override_size_limit`, which the MCP instructions require it to do only after the
+   end user accepts the risk.
 
 "Server decides how to split": text-like payload → semantic chunker (§4); any file
 is accepted for upload, the split/convert decision happens server-side at step 3.

@@ -569,3 +569,49 @@ scripts. The root cause is wave 3 work: the pipeline holds several full copies o
 body at once (`task + body` for `count_tokens`, per-chunk prompt strings, the
 consolidation input), and removing those copies is what would make a larger cap
 genuinely reachable rather than merely advertised.
+
+---
+
+## 9 · Ingest cap set to a reachable value (shipped 2026-10-10)
+
+Owner's decision after §8: default `max_file_mb` 50 → **20**, plus an escape hatch
+that is opt-in at both ends.
+
+- `ingest.max_file_mb: 20` — 223 MB peak against a 350 MB ceiling, 127 MB of
+  headroom, honest for Cyrillic and for Latin text alike.
+- `ingest.allow_oversize: false` — the owner's switch. While it is off the cap is
+  absolute: `override_size_limit` is refused with `oversize_not_permitted` (HTTP 403),
+  so no caller can talk its way past it.
+- `file_upload_ticket(…, override_size_limit=true)` — works only when the owner has
+  opted in. Two keys have to agree before the cap can be exceeded, which is the
+  point: an agent cannot authorise itself.
+- `file_too_large` now carries a `fix` field naming the three alternatives instead of
+  just the numbers, and the MCP instructions carry a SIZE DISCIPLINE block telling an
+  agent to (1) re-save as plain text or Markdown — RTF/DOCX markup often outweighs the
+  words, and archives are not accepted; (2) split across separate uploads and
+  `analyze_file` calls and combine the answers, reporting the separate charges; (3)
+  only then ask the user for explicit permission, stating plainly that the service may
+  be killed mid-job and take other work with it. Instructions grew 2 559 → 3 722
+  chars; this is the one canonical copy, and `quota_status.file_flow` was deliberately
+  left alone rather than duplicating it.
+
+`INSTRUCTIONS` is the only place the guidance lives; `docs/03` records why the cap is
+a memory guard rather than a provider limit, and `docs/06` records the measured
+11 MB-per-MB cost so the next reader can re-derive the number instead of trusting it.
+
+### Provider limits, checked rather than guessed
+
+The 20 MB vs 100 MB disagreement in secondary sources is a conflation of three
+different numbers. Per `ai.google.dev/gemini-api/docs/files`: inline request payloads
+(including the prompt) are capped at **100 MB**, or **50 MB for PDFs**; the **Files
+API** stages up to **2 GB per file** and **20 GB per project** for **48 hours**. The
+20 MB figure is the *former* inline limit, and separately a client-side cap in
+`gemini-cli`'s own `read_file` tool — neither is a current API limit.
+
+None of them bind here. Grepping both repos for `inline_data`, `fileData`, `file_uri`,
+`base64` and the Files upload endpoint returns nothing: this gateway never sends file
+bytes to the provider. `analyze_file` extracts text on the server and feeds the
+chunking pipeline, so the only limit that matters is local RAM — which is exactly what
+§8 measured. Adopting the Files API would be a way to send *binary* payloads (PDF,
+images, audio) to the model directly; it would not raise the ceiling on text analysis,
+because text analysis is not payload-bound.

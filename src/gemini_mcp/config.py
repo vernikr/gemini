@@ -55,7 +55,13 @@ class IngestCfg(BaseModel):
     """File ingest (M4.5): inbox dir, caps, ticket TTL, retention (§9).
     M4.6: pandoc converts RTF/DOCX → GitHub-flavored Markdown server-side."""
     dir: str = "inbox"
-    max_file_mb: int = 50
+    # 20 MB keeps a single job inside the service's memory allowance. The gateway
+    # holds the extracted document in memory while it chunks, so a larger file can
+    # push the unit past MemoryMax and kill every in-flight job with it.
+    max_file_mb: int = 20
+    # Owner's escape hatch. When true, an agent may issue an oversized ticket after
+    # the end user explicitly accepts the risk — see the FILE INGEST instructions.
+    allow_oversize: bool = False
     ticket_ttl_s: int = 900
     keep_hours: float = 24
     total_cap_mb: float = 500

@@ -213,15 +213,25 @@ async def gemini_generate_tool(deps: Deps, emitter: ProgressEmitter, params: dic
     return {"report": _report(meta), "result": res.text, "meta": meta}
 
 
-async def file_upload_ticket_tool(deps: Deps, filename: str, size_bytes: int) -> dict:
+async def file_upload_ticket_tool(deps: Deps, filename: str, size_bytes: int,
+                                  override_size_limit: bool = False) -> dict:
     cfg = deps.app_cfg
     max_bytes = cfg.ingest.max_file_mb * 1_048_576
     if size_bytes <= 0:
         raise ToolError(json.dumps({"error": "bad_size",
                                     "hint": "size_bytes must be > 0"}))
-    if size_bytes > max_bytes:
-        raise ToolError(json.dumps({"error": "file_too_large", "bytes": size_bytes,
-                                    "max_bytes": max_bytes}))
+    if override_size_limit and not cfg.ingest.allow_oversize:
+        raise ToolError(json.dumps({
+            "error": "oversize_not_permitted", "bytes": size_bytes,
+            "max_bytes": max_bytes,
+            "hint": "the server has ingest.allow_oversize=false, so no caller may "
+                    "exceed the cap; shrink or split the file instead"}))
+    if size_bytes > max_bytes and not override_size_limit:
+        raise ToolError(json.dumps({
+            "error": "file_too_large", "bytes": size_bytes, "max_bytes": max_bytes,
+            "fix": "compress the file locally, split it across separate requests, or "
+                   "ask the user for explicit permission to exceed the cap and retry "
+                   "with override_size_limit=true"}))
     token = os.environ.get("GEMINI_MCP_TOKEN", "")
     inbox = Path(cfg.ingest.dir)
     await asyncio.to_thread(ingest.prune, inbox, cfg.ingest.keep_hours,
@@ -234,6 +244,7 @@ async def file_upload_ticket_tool(deps: Deps, filename: str, size_bytes: int) ->
     out: dict = {
         "upload_id": upload_id, "upload_url": url,
         "expires_in_s": cfg.ingest.ticket_ttl_s,
+        "oversize": size_bytes > max_bytes,
         "instructions": (f"ONE command: curl -T '{filename}' '{url}'  (through the "
                          f":{cfg.server.http_port} tunnel; the signature IS the auth, "
                          f"no headers needed). Then call analyze_file(task=…, "

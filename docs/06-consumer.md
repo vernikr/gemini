@@ -185,6 +185,14 @@ File flow (for the agent — also returned by `quota_status` in the `file_flow` 
 `gemini_generate`/`analyze_large` is rejected (`raw_document_inlined`): markup like RTF
 is unreadable for the model (non-ASCII text survives as hex escapes).
 
+Per-upload cap: `ingest.max_file_mb`. It is a memory guard sized against the service's
+`MemoryMax`, not a provider limit — the pipeline holds the extracted text in RAM while
+chunking, and the measured cost is roughly 11 MB of RSS per uploaded megabyte, so the
+unit is OOM-killed near 31 MB regardless of what this setting says. Set it no higher
+than you can afford to lose the service over. `ingest.allow_oversize: true` lets an
+agent exceed it with `override_size_limit` after the user accepts that risk; left at
+`false`, the cap is absolute and no caller can talk its way past it.
+
 Terminal (no client needed):
 
 ```bash

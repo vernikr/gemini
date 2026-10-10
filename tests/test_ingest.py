@@ -3,6 +3,7 @@ binary fail-fast with ZERO spend, server-side RTF extraction, analyze_file E2E,
 bearer-exempt upload route. No network (b01)."""
 from __future__ import annotations
 
+import json
 import os
 import time
 from pathlib import Path
@@ -164,3 +165,54 @@ async def test_analyze_file_missing_bytes(tmp_path, monkeypatch):
         await analyze_file_tool(deps, ProgressEmitter(FakeCtx()),
                                 {"task": "t", "upload_id": ticket["upload_id"]})
     assert "upload_not_found" in str(ei.value)
+
+
+# ------------------------------------------------- size cap and its escape hatch
+async def test_ticket_refuses_over_cap_with_the_three_alternatives(tmp_path,
+                                                                   monkeypatch):
+    """The refusal has to tell the agent what to do instead, not just say no."""
+    deps = _deps(tmp_path, monkeypatch, max_file_mb=1)
+    with pytest.raises(ToolError) as ei:
+        await file_upload_ticket_tool(deps, "big.txt", 3 * 1_048_576)
+    payload = json.loads(str(ei.value))
+    assert payload["error"] == "file_too_large"
+    assert payload["max_bytes"] == 1_048_576
+    for word in ("compress", "split", "explicit permission", "override_size_limit"):
+        assert word in payload["fix"], payload["fix"]
+
+
+async def test_oversize_needs_both_the_flag_and_the_owner(tmp_path, monkeypatch):
+    """override_size_limit alone is not enough — the server owner has to opt in, so
+    an agent can never talk itself past the cap."""
+    locked = _deps(tmp_path / "a", monkeypatch, max_file_mb=1)
+    (tmp_path / "a" / "inbox").mkdir(parents=True)
+    with pytest.raises(ToolError) as ei:
+        await file_upload_ticket_tool(locked, "big.txt", 3 * 1_048_576,
+                                      override_size_limit=True)
+    assert json.loads(str(ei.value))["error"] == "oversize_not_permitted"
+
+    open_ = _deps(tmp_path / "b", monkeypatch, max_file_mb=1, allow_oversize=True)
+    (tmp_path / "b" / "inbox").mkdir(parents=True)
+    ticket = await file_upload_ticket_tool(open_, "big.txt", 3 * 1_048_576,
+                                           override_size_limit=True)
+    assert ticket["oversize"] is True and ticket["upload_id"]
+
+    # the upload route trusts the ticket once the owner has opted in
+    srv = build_server(open_)
+    app = build_http_app(srv, open_.app_cfg, TOKEN)
+    u = urlsplit(ticket["upload_url"])
+    body = b"z" * (3 * 1_048_576)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as c:
+        r = await c.put(f"{u.path}?{u.query}", content=body)
+    assert r.status_code == 200 and r.json()["bytes"] == len(body)
+
+
+def test_default_cap_is_twenty_megabytes():
+    """Guards the measured ceiling: at ~11 MB of RSS per uploaded MB the service is
+    OOM-killed near 31 MB, so the default must stay well under that."""
+    from gemini_mcp.config import AppCfg
+
+    cfg = AppCfg().ingest
+    assert cfg.max_file_mb == 20
+    assert cfg.allow_oversize is False
