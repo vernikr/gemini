@@ -29,11 +29,13 @@ Undo everything: `… uninstall --yes`.
 ## 2. Add to your MCP client (JSON)
 
 `setup` **prints** the JSON block but never edits client configs itself (formats differ
-per client; auto-write is planned as M7.5). Since 0.9.1 the printout is mode-aware:
-direct mode says **paste NOW** and shows the full `{"mcpServers": …}` wrapper (npx form
-when `npx` is on PATH, uvx-pinned otherwise, plus where each client's config lives);
-fleet/router mode says **do NOT paste yet** and lists the concrete server-deploy steps
-first, then the ssh snippet. Two wiring forms:
+per client; auto-write is planned as M7.5). The printout is mode-aware: direct mode says
+**paste NOW** and shows the full `{"mcpServers": …}` wrapper (npx form when `npx` is on
+PATH, uvx-pinned otherwise, plus where each client's config lives). Fleet mode (0.10.0+)
+**deploys the server for you** — repos, provisioning, keys, healthcheck — and then also
+ends with a paste-NOW block carrying your real host; only if the auto-deploy can't run
+(missing host, no git/ssh auth, Windows) it falls back to short numbered manual steps.
+Two wiring forms:
 
 - **After the wizard** (option A): keys already live in `~/.config/gemini-mcp/.env` —
   the block below needs no env.
@@ -118,12 +120,30 @@ one-time uv resolve (~10–20 s), then it's cached.
 
 ### Fleet mode instead (you DO have a server)
 
+The wizard does the whole server side (0.10.0+). Answer its questions (or pass flags):
+
+```bash
+gemini-mcp setup --backend router --vps-host <ip> \
+  [--vps-user root] [--projects-dir ~/projects] [--keys 'AIza…' | --keys-file f]
+```
+
+It clones/updates `vernikr/gemini-mcp` + `vernikr/gemini-router` into the projects
+folder (existing clones are `git pull`ed — never re-cloned over), runs
+`scripts/run_remote.sh setup` (rsync + provision + systemd unit, output streamed),
+optionally writes your Gemini keys into the server's `.env` (0600, keys travel over
+stdin — never visible in `ps`/history), waits for `/healthz`, and prints the final
+paste-NOW snippet with your real host. Requirements: macOS/Linux, git authenticated
+to GitHub (private repos — `gh auth login` or a credential helper), ssh access to the
+server. After any `git tag`, push-CD updates the server automatically (docs/09-ci.md).
+
+The snippet it prints (host already filled in):
+
 ```json
 {
   "mcpServers": {
     "gemini": {
       "command": "ssh",
-      "args": ["root@<YOUR_VPS>", "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"]
+      "args": ["root@<YOUR_VPS>", "/root/.local/bin/gemini-mcp", "stdio"]
     }
   }
 }

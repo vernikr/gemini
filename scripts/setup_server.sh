@@ -78,6 +78,40 @@ as_app uv pip install --no-cache "mcp[cli]>=1.9" "uvicorn>=0.30" "starlette>=0.3
 # already installed from local source above, so we skip dependency resolution entirely.
 as_app uv pip install --no-cache --no-deps "$APP"
 
+# ---- released package via `uv tool` — the binary the systemd unit runs (push-CD
+# manages its version: /usr/local/bin/deploy-tools does `uv tool install --force`).
+# The .venv above stays as the source/dev fallback (doctor, status, local patches).
+UHOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
+TOOL_BIN="$UHOME/.local/bin/gemini-mcp"
+VER="$(sed -n 's/^version = "\(.*\)"/\1/p' "$APP/pyproject.toml" | head -1)"
+sudo -u "$APP_USER" env HOME="$UHOME" uv tool install --force "gemini-mcp-gateway==$VER" \
+  >/dev/null 2>&1 \
+  || sudo -u "$APP_USER" env HOME="$UHOME" uv tool install --force gemini-mcp-gateway \
+  >/dev/null 2>&1
+[[ -x $TOOL_BIN ]] || { echo "uv tool install gemini-mcp-gateway failed (no $TOOL_BIN)" >&2; exit 1; }
+
+# ---- config-home anchor for BARE ssh launches (Freebuff stdio → no EnvironmentFile):
+# ~/.config/gemini-mcp → $APP makes .env/config.yaml/logs identical on every transport.
+# Explicit -L check: `ln -sfn` into an existing dir would nest the link inside it.
+mkdir -p "$UHOME/.config"
+if [[ ! -L "$UHOME/.config/gemini-mcp" ]]; then
+  rm -rf "$UHOME/.config/gemini-mcp"
+  ln -s "$APP" "$UHOME/.config/gemini-mcp"
+fi
+
+# ---- push-CD whitelist entry (only when the dispatcher exists on this host) ----
+if [[ -x /usr/local/bin/deploy-tools && ! -f /etc/deploy-tools.d/gemini-mcp.conf ]]; then
+  cat > /etc/deploy-tools.d/gemini-mcp.conf <<CONF
+INSTALLER=uv
+PKG=gemini-mcp-gateway
+BIN=gemini-mcp
+UNIT=gemini-mcp.service
+STATUS_URL=http://127.0.0.1:8790/healthz
+HEALTH_FIELD=version
+CONF
+  echo "created /etc/deploy-tools.d/gemini-mcp.conf (push-CD)"
+fi
+
 # ---- systemd unit (loopback only; no firewall changes needed) ----
 cat > /etc/systemd/system/gemini-mcp.service <<UNIT
 [Unit]
@@ -89,15 +123,15 @@ Wants=network-online.target
 User=$APP_USER
 WorkingDirectory=$APP
 EnvironmentFile=$ENVF
-ExecStart=$APP/.venv/bin/gemini-mcp serve
+ExecStart=$TOOL_BIN serve
 Restart=on-failure
 RestartSec=3
 MemoryMax=350M
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
-ProtectHome=true
 ReadWritePaths=$APP $SHARED
+# NOTE: no ProtectHome — it would hide $UHOME/.local (the uv-tool binary) from the unit.
 
 [Install]
 WantedBy=multi-user.target
@@ -109,7 +143,7 @@ sleep 2
 systemctl --no-pager status gemini-mcp.service | sed -n '1,5p' || true
 
 # ---- offline sanity (no quota spent; online checks live in smoke.sh) ----
-if sudo -u "$APP_USER" bash -c "set -a; . '$ENVF'; set +a; cd '$APP' && '$APP/.venv/bin/gemini-mcp' doctor --offline"; then
+if sudo -u "$APP_USER" env HOME="$UHOME" bash -c "set -a; . '$ENVF'; set +a; cd '$APP' && '$TOOL_BIN' doctor --offline"; then
   echo
   echo "SETUP OK. Daemon: http://127.0.0.1:8790 (bearer in $ENVF → GEMINI_MCP_TOKEN)."
   echo "Next: bash $APP/scripts/smoke.sh   # first real-key run, spends ≤1 RPD"

@@ -19,7 +19,9 @@ from .config import AppCfg, load_all
 from .logging_setup import AuditLogger, enforce_audit_size, prune_jsonl, redact, setup_logging
 from .tools import Deps
 
-console = Console(stderr=True)
+console = Console(stderr=True, highlight=False)   # highlight=False: no auto-underlined
+                                                  # URLs in printed commands (confusing:
+                                                  # they are not clickable)
 
 
 def _deps(app_cfg: AppCfg, router_cfg) -> Deps:
@@ -235,11 +237,21 @@ def _bootstrap_env() -> None:
         return
     env_file = os.environ.get("GEMINI_MCP_ENV_FILE")
     from .config import config_home
+    home_env = config_home() / ".env"
     cands = ([Path(env_file)] if env_file else []) \
-        + [config_home() / ".env", Path.cwd() / ".env"]
+        + [home_env, Path.cwd() / ".env"]
     for cand in cands:
         if cand.is_file():
             load_dotenv(cand, override=False)
+            if cand == home_env:
+                # anchor cwd to the config home (relative logging.dir, config.yaml
+                # discovery): bare launches — incl. the uv-tool binary on the VPS,
+                # where config-home may symlink to the app dir — behave like the
+                # old .venv-layout anchor.
+                try:
+                    os.chdir(config_home())
+                except OSError:
+                    pass
             return
 
 
@@ -255,7 +267,9 @@ def _run_setup(args) -> int:
         merged = parse_keys(keys or "") + parse_keys(kfp.read_text(encoding="utf-8"))
         keys = ",".join(dict.fromkeys(merged)) or None
     rep = run_setup(backend=args.backend, keys=keys, probe=not args.offline,
-                    force=args.force, json_out=args.json, console=console)
+                    force=args.force, json_out=args.json, console=console,
+                    vps_host=args.vps_host, vps_user=args.vps_user,
+                    projects_dir=args.projects_dir)
     if args.json:
         print(json.dumps(rep, indent=1, ensure_ascii=False, default=str))
     else:
@@ -294,6 +308,11 @@ def main(argv: list[str] | None = None) -> int:
                                        "separated, # comments ok)")
     p.add_argument("--offline", action="store_true", help="skip the live key probe")
     p.add_argument("--force", action="store_true", help="overwrite existing keys/config")
+    p.add_argument("--vps-host", help="fleet: VPS host/IP to deploy to (prompted if TTY)")
+    p.add_argument("--vps-user", help="fleet: SSH user on the VPS (default root)")
+    p.add_argument("--projects-dir", help="fleet: folder for the repo clones "
+                                          "(default ~/projects; cloned or updated "
+                                          "automatically)")
     p.add_argument("--json", action="store_true")
     p = sub.add_parser("uninstall", help="remove wizard-written keys+config")
     p.add_argument("--yes", action="store_true")

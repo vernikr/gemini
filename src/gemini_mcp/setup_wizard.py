@@ -11,7 +11,12 @@ import asyncio
 import getpass
 import json
 import os
+import shutil
 import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
 
 import yaml
 from gemini_router import Router
@@ -22,16 +27,33 @@ from . import __version__
 from .backends import MemLedger
 from .config import config_home
 
+FLEET_REPOS = ("gemini-mcp", "gemini-router")     # github.com/vernikr/<name>, private
+FLEET_HEALTHZ = "curl -fsS --max-time 3 http://127.0.0.1:8790/healthz"
+
+
+class SetupError(RuntimeError):
+    """Readable one-line failure for the fleet auto-deploy (rendered, never traceback)."""
+
 ENV_HEADER = ("# gemini-mcp credentials — written by `gemini-mcp setup` (mode 0600).\n"
               "# Keys: https://aistudio.google.com/app/apikey (free tier).\n")
 CFG_HEADER = "# gemini-mcp app config — written by `gemini-mcp setup`.\n"
 
 
-def _client_snippets(backend: str) -> dict:
-    """Structured wiring guidance for the report/terminal. Direct = paste NOW (two
-    equivalent forms, renderer picks by what's on PATH); fleet = deploy FIRST, paste
-    later — with concrete terminal steps instead of repo-doc references (dlx users
-    don't have the repo)."""
+def _tool_bin(user: str) -> str:
+    home = "/root" if user == "root" else f"/home/{user}"
+    return f"{home}/.local/bin/gemini-mcp"      # uv-tool binary — the CD-managed one
+
+
+def _client_snippets(backend: str, fleet: dict | None = None,
+                     deployed: bool = False) -> dict:
+    """Structured wiring guidance. Direct = paste NOW (renderer picks npx/uvx by PATH).
+    Fleet: after the wizard's own auto-deploy succeeded it is ALSO paste-now (with the
+    real host baked in); otherwise fall back to short manual steps (no repo-doc refs —
+    dlx users don't have the repo)."""
+    paste_where = {"freebuff": "~/.agents/mcp.json",
+                   "claude_desktop": "~/Library/Application Support/Claude/"
+                                     "claude_desktop_config.json",
+                   "cursor": "~/.cursor/mcp.json"}
     if backend == "direct":
         return {"paste_now": True,
                 "pnpm_npx": {"command": "npx",
@@ -39,24 +61,142 @@ def _client_snippets(backend: str) -> dict:
                 "uvx_pinned": {"command": "uvx",
                                "args": ["--from", f"gemini-mcp-gateway=={__version__}",
                                         "gemini-mcp", "stdio"]},
-                "paste_where": {
-                    "freebuff": "~/.agents/mcp.json",
-                    "claude_desktop": "~/Library/Application Support/Claude/"
-                                      "claude_desktop_config.json",
-                    "cursor": "~/.cursor/mcp.json"}}
-    return {"paste_now": False,
-            "ssh": {"command": "ssh",
-                    "args": ["root@<YOUR_VPS>",
-                             "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"]},
+                "paste_where": paste_where}
+    host = (fleet or {}).get("host") or "<YOUR_VPS>"
+    user = (fleet or {}).get("user") or "root"
+    ssh_entry = {"command": "ssh",
+                 "args": [f"{user}@{host}", _tool_bin(user), "stdio"]}
+    if deployed:
+        return {"paste_now": True, "ssh": ssh_entry, "paste_where": paste_where}
+    return {"paste_now": False, "ssh": ssh_entry,
             "deploy_steps": [
-                "on your workstation: git clone https://github.com/vernikr/gemini-mcp "
-                "(and https://github.com/vernikr/gemini-router beside it)",
-                "VPS_HOST=<your-server-ip> VPS_USER=root bash scripts/run_remote.sh "
-                "setup    (rsync + provision + systemd unit; idempotent)",
-                "put your Gemini keys on the SERVER: GEMINI_API_KEYS=AIza…,AIza… in "
-                "/opt/apps/gemini-mcp/.env (chmod 600; setup_server.sh prompts/imports)",
-                "THEN paste the ssh snippet below into your client config, replacing "
-                "<YOUR_VPS>, and restart the client"]}
+                f"re-run with the wizard doing the work: gemini-mcp setup --backend "
+                f"router --vps-host {host}   (clones/updates the repos, provisions "
+                f"the server, pushes keys — needs git+ssh auth from this machine, "
+                f"macOS/Linux)",
+                "or fully manual: git clone https://github.com/vernikr/gemini-mcp and "
+                "…/gemini-router side by side (folder already exists? "
+                "git -C <dir> pull --ff-only instead of cloning)",
+                f"from inside the gemini-mcp clone: VPS_HOST={host} VPS_USER={user} "
+                "bash scripts/run_remote.sh setup   (streams its own progress)",
+                f"keys: ssh {user}@{host} and set GEMINI_API_KEYS=AIza…,AIza… in "
+                "/opt/apps/gemini-mcp/.env (chmod 600), then "
+                "systemctl restart gemini-mcp",
+                "THEN paste the ssh snippet below into your client config and "
+                "restart the client"]}
+
+
+def _ver_tuple(v: str) -> tuple[int, ...]:
+    parts = []
+    for p in str(v).split(".")[:3]:
+        digits = "".join(ch for ch in p if ch.isdigit())
+        parts.append(int(digits or 0))
+    return tuple(parts)
+
+
+def _sync_repos(projects_dir: Path, log: list[str]) -> Path:
+    """Clone-or-update both fleet repos under projects_dir; return the mcp repo path.
+    Existing clones are pulled (never re-cloned: 'destination path already exists'
+    can't happen); a non-git non-empty dir is a readable error."""
+    if not shutil.which("git"):
+        raise SetupError("git not found on PATH — install git, or deploy manually")
+    projects_dir.mkdir(parents=True, exist_ok=True)
+    for name in FLEET_REPOS:
+        d = projects_dir / name
+        if (d / ".git").is_dir():
+            r = subprocess.run(["git", "-C", str(d), "pull", "--ff-only", "--quiet"],
+                               capture_output=True, text=True, timeout=300)
+            log.append(f"updated {d}" if r.returncode == 0 else
+                       f"kept {d} as-is (git pull failed: "
+                       f"{(r.stderr or r.stdout).strip()[:120]})")
+        elif d.exists() and any(d.iterdir()):
+            raise SetupError(f"{d} exists but is not a git clone — move it aside "
+                             "and re-run")
+        else:
+            r = subprocess.run(["git", "clone", "--quiet",
+                                f"https://github.com/vernikr/{name}.git", str(d)],
+                               capture_output=True, text=True, timeout=600)
+            if r.returncode != 0:
+                raise SetupError(f"git clone {name} failed: "
+                                 f"{(r.stderr or r.stdout).strip()[:200]} — the repos "
+                                 "are private; your git must authenticate to GitHub "
+                                 "(gh auth login or a credential helper)")
+            log.append(f"cloned {d}")
+    return projects_dir / "gemini-mcp"
+
+
+def _ssh(host: str, user: str, remote: str, *, input: str | None = None,
+         timeout: int = 30, batch: bool = True):
+    cmd = ["ssh"] + (["-o", "BatchMode=yes"] if batch else []) \
+        + ["-o", "ConnectTimeout=10", f"{user}@{host}", remote]
+    return subprocess.run(cmd, input=input, capture_output=True, text=True,
+                          timeout=timeout)
+
+
+def _server_health(host: str, user: str) -> dict | None:
+    try:
+        r = _ssh(host, user, FLEET_HEALTHZ, timeout=25)
+        return json.loads(r.stdout) if r.returncode == 0 else None
+    except Exception:                                  # noqa: BLE001 — probe is best-effort
+        return None
+
+
+def _provision(repo: Path, host: str, user: str) -> None:
+    if sys.platform == "win32":
+        raise SetupError("fleet auto-deploy needs macOS/Linux (bash+rsync+ssh) — "
+                         "use the manual steps below")
+    script = repo / "scripts" / "run_remote.sh"
+    if not script.is_file():
+        raise SetupError(f"{script} missing in the clone — cannot provision")
+    env = {**os.environ, "VPS_HOST": host, "VPS_USER": user}
+    r = subprocess.run(["bash", str(script), "setup"], cwd=str(repo), env=env)
+    if r.returncode != 0:
+        raise SetupError(f"provisioning failed (run_remote.sh rc={r.returncode}; "
+                         "its output is above)")
+
+
+def _push_keys(host: str, user: str, keys_csv: str) -> None:
+    """Keys travel over STDIN — never in argv (ps/history on both ends stay clean)."""
+    remote = ("read -r k; f=/opt/apps/gemini-mcp/.env; "
+              "[ -f $f ] || { echo 'server .env missing (provision first)' >&2; exit 1; }; "
+              "sed -i '/^GEMINI_API_KEYS=/d' $f; echo \"GEMINI_API_KEYS=$k\" >> $f; "
+              "chmod 600 $f; systemctl restart gemini-mcp.service")
+    r = _ssh(host, user, remote, input=keys_csv + "\n", timeout=40, batch=False)
+    if r.returncode != 0:
+        raise SetupError("could not write keys to the server .env (ssh rc="
+                         f"{r.returncode}: {(r.stderr or '').strip()[:160]})")
+
+
+def deploy_fleet(*, host: str, user: str, projects_dir: Path,
+                 keys_csv: str | None) -> dict:
+    """End-to-end fleet deploy: repos → provision (skipped when the server already
+    runs this version or newer) → keys → health. Raises SetupError with context."""
+    log: list[str] = []
+    repo = _sync_repos(projects_dir, log)
+    pre = _server_health(host, user)
+    if pre and pre.get("ok") and _ver_tuple(pre.get("version", "")) >= _ver_tuple(__version__):
+        log.append(f"server already runs gemini-mcp {pre.get('version')} "
+                   f"(>= {__version__}) — provisioning skipped")
+    else:
+        log.append(f"provisioning {user}@{host} via scripts/run_remote.sh setup "
+                   "(output streams below)")
+        _provision(repo, host, user)
+        log.append("provisioning finished")
+    if keys_csv:
+        _push_keys(host, user, keys_csv)
+        log.append("API keys written to the server .env (0600); unit restarted")
+    health = None
+    for _ in range(20):
+        health = _server_health(host, user)
+        if health and health.get("ok"):
+            break
+        time.sleep(1.5)
+    if not health or not health.get("ok"):
+        raise SetupError(f"server not healthy after deploy — check: ssh {user}@{host} "
+                         "systemctl status gemini-mcp")
+    log.append(f"healthz ok: version={health.get('version')} "
+               f"backend={health.get('backend')}")
+    return {"log": log, "healthz": health}
 
 
 async def _probe_keys(keys: list[str]) -> list[dict]:
@@ -77,9 +217,12 @@ async def _probe_keys(keys: list[str]) -> list[dict]:
 
 def run_setup(*, backend: str | None = None, keys: str | None = None,
               probe: bool = True, force: bool = False, json_out: bool = False,
-              console=None) -> dict:
-    """Interactive when neither --backend/--keys nor --json pins the flow. Returns the
-    report dict (secret-free: key fingerprints only)."""
+              console=None, vps_host: str | None = None, vps_user: str | None = None,
+              projects_dir: str | None = None) -> dict:
+    """Interactive when neither --backend/--keys nor --json pins the flow. Fleet mode
+    auto-deploys the server side (clone/pull repos → run_remote.sh → keys → health)
+    and finishes with a paste-NOW snippet carrying the real host. Returns the report
+    dict (secret-free: key fingerprints only)."""
     home = config_home()
     interactive = not json_out and keys is None and backend is None
     if interactive:
@@ -89,13 +232,37 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
             console.print("  1) [bold]Simple[/bold] — direct to Google AI Studio from "
                           "this machine (no server; default)")
             console.print("  2) [bold]Fleet[/bold] — gateway on my VPS/router "
-                          "(shared quota ledger)")
+                          "(shared quota ledger; the wizard deploys it for you)")
         choice = Prompt.ask("How will you run gemini-mcp?", choices=["1", "2"],
                             default="1", console=console)
         backend = "direct" if choice == "1" else "router"
     backend = backend or "direct"
     report: dict = {"tool": "setup", "backend": backend, "config_home": str(home),
                     "created": [], "kept": [], "overwritten": [], "key_ids": []}
+    fleet: dict = {}
+    if backend == "router":
+        from rich.prompt import Confirm, Prompt
+        tty = sys.stdin.isatty() and not json_out
+        fleet = {"host": vps_host or os.environ.get("VPS_HOST") or "",
+                 "user": vps_user or os.environ.get("VPS_USER") or "root",
+                 "projects_dir": str(Path(
+                     projects_dir or os.environ.get("GEMINI_MCP_PROJECTS_DIR")
+                     or Path.home() / "projects").expanduser())}
+        if tty and not fleet["host"]:
+            fleet["host"] = Prompt.ask("VPS host/IP for the fleet gateway",
+                                       console=console)
+            fleet["user"] = Prompt.ask("SSH user on that server",
+                                       default=fleet["user"], console=console)
+            fleet["projects_dir"] = Prompt.ask(
+                "Projects folder (repos are cloned/updated there, nothing is "
+                "downloaded twice)", default=fleet["projects_dir"], console=console)
+        if tty and keys is None and Confirm.ask(
+                "Paste Gemini API keys for the SERVER now? (No = keep the keys "
+                "already on it)", default=False, console=console):
+            keys = getpass.getpass("keys (comma-separated, hidden): ")
+        if keys:
+            fleet["key_ids"] = [key_id(k.strip()) for k in keys.split(",") if k.strip()]
+        report["fleet"] = fleet
     if (backend == "direct" and keys is None and json_out
             and not os.environ.get("GEMINI_API_KEYS")):
         report["error"] = ("keys required in --json mode: pass --keys 'AIza…' or set "
@@ -137,21 +304,51 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
                             encoding="utf-8")
         report["overwritten" if existed else "created"].append(str(cfg_path))
 
-    if probe and key_list:
-        try:
+    if probe and key_list and backend == "direct":   # fleet keys live (and probe) on
+        try:                                          # the server — never spent here
             report["probe"] = asyncio.run(_probe_keys(key_list))
         except Exception as e:  # noqa: BLE001 — offline must not fail the setup
             report["probe"] = {"error": str(e)[:200],
                                "hint": "keys are saved; re-check with `gemini-mcp doctor`"}
-    report["snippets"] = _client_snippets(backend)
-    report["next"] = (
-        "paste the snippet below into your MCP client config NOW (one time), restart "
-        "the client fully; the first call takes ~10–20 s (one-time dependency "
-        "resolve). Verify: ask the agent to call the quota_status tool."
-        if backend == "direct" else
-        "do NOT paste into your client yet — first deploy the server side with the "
-        "numbered steps below (keys live on the server, none on this machine), then "
-        "paste the ssh snippet. Fleet quota/calls/doctor run ON THE SERVER via ssh.")
+    deployed = False
+    if backend == "router":
+        keys_csv = ",".join(k.strip() for k in (keys or "").split(",")
+                            if k.strip()) or None
+        if not fleet.get("host"):
+            report["deploy_error"] = ("no VPS host — re-run interactively (it will "
+                                      "ask) or pass --vps-host <ip>")
+        elif not shutil.which("ssh"):
+            report["deploy_error"] = "ssh client not found on PATH — deploy manually"
+        else:
+            if console:
+                console.print(f"[bold]→ deploying the fleet gateway to "
+                              f"{fleet['user']}@{fleet['host']} …[/bold]")
+            try:
+                report["deploy"] = deploy_fleet(
+                    host=fleet["host"], user=fleet["user"],
+                    projects_dir=Path(fleet["projects_dir"]), keys_csv=keys_csv)
+                deployed = True
+            except SetupError as e:
+                report["deploy_error"] = str(e)
+            except Exception as e:  # noqa: BLE001 — wizard must stay readable
+                report["deploy_error"] = f"{type(e).__name__}: {e}"[:300]
+    report["snippets"] = _client_snippets(backend, fleet=fleet or None,
+                                          deployed=deployed)
+    if backend == "direct":
+        report["next"] = (
+            "paste the snippet below into your MCP client config NOW (one time), "
+            "restart the client fully; the first call takes ~10–20 s (one-time "
+            "dependency resolve). Verify: ask the agent to call the quota_status tool.")
+    elif deployed:
+        report["next"] = (
+            "server deployed ✓ — paste the snippet below into your MCP client config "
+            "NOW (one time) and restart the client fully. Keys and the shared quota "
+            "ledger live on the server; nothing secret is stored on this machine. "
+            "Verify: ask the agent to call the quota_status tool.")
+    else:
+        report["next"] = (
+            f"auto-deploy did not finish ({report.get('deploy_error', '?')[:120]}) — "
+            "do the numbered steps below once, then paste the ssh snippet.")
     return report
 
 
@@ -202,25 +399,35 @@ def render_report(rep: dict, console) -> None:
                       + (f", {row['models']} models" if row.get("models") else ""))
     if isinstance(rep.get("probe"), dict):
         console.print(f"  [yellow]probe skipped: {rep['probe'].get('error')}[/yellow]")
+    for line in (rep.get("deploy") or {}).get("log", []):
+        console.print(f"  [green]✓[/green] {line}")
+    if (rep.get("fleet") or {}).get("key_ids"):
+        console.print(f"  keys pushed to the SERVER: "
+                      f"{', '.join(rep['fleet']['key_ids'])} (fingerprints)")
+    if rep.get("deploy_error"):
+        console.print(f"  [yellow]deploy: {rep['deploy_error']}[/yellow]")
     snip = rep.get("snippets") or {}
     if snip.get("paste_now"):
-        import shutil
-        primary = "pnpm_npx" if shutil.which("npx") else "uvx_pinned"
-        alt = "uvx_pinned" if primary == "pnpm_npx" else "pnpm_npx"
+        entry = snip.get("ssh")                   # fleet, deployed → real host baked in
+        alt = None
+        if entry is None:                         # direct → npx/uvx by PATH
+            primary = "pnpm_npx" if shutil.which("npx") else "uvx_pinned"
+            alt = "uvx_pinned" if primary == "pnpm_npx" else "pnpm_npx"
+            entry = snip[primary]
         console.print("[bold green]▶ Paste this into your MCP client config NOW[/bold green] "
                       "(one time — it is the whole wiring):")
-        console.print(json.dumps({"mcpServers": {"gemini": snip[primary]}}, indent=1))
-        pw = snip.get("paste_where") or {}
-        for name, path in pw.items():
+        console.print(json.dumps({"mcpServers": {"gemini": entry}}, indent=1))
+        for name, path in (snip.get("paste_where") or {}).items():
             console.print(f"    [dim]{name}:[/dim] {path}")
-        console.print(f"  [dim]equivalent alternative form: "
-                      f"{json.dumps(snip[alt], ensure_ascii=False)}[/dim]")
+        if alt:
+            console.print(f"  [dim]equivalent alternative form: "
+                          f"{json.dumps(snip[alt], ensure_ascii=False)}[/dim]")
     elif snip.get("ssh"):
-        console.print("[bold yellow]▶ Do NOT paste into your client yet.[/bold yellow] "
-                      "Fleet mode: deploy the server first —")
+        console.print("[bold yellow]▶ Server not deployed yet — do NOT paste into "
+                      "your client.[/bold yellow] Fastest path:")
         for i, step in enumerate(snip.get("deploy_steps", []), 1):
             console.print(f"  {i}. {step}")
-        console.print("  [bold]then[/bold] paste (replace <YOUR_VPS>):")
+        console.print("  [bold]then[/bold] paste:")
         console.print(json.dumps({"mcpServers": {"gemini": snip["ssh"]}}, indent=1))
     if rep.get("next"):
         console.print(f"[dim]next: {rep['next']}[/dim]")

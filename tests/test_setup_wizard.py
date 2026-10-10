@@ -66,6 +66,7 @@ def test_setup_json_requires_keys(tmp_path, monkeypatch):
 
 def test_setup_router_mode_no_env(tmp_path, monkeypatch):
     home = _home(tmp_path, monkeypatch)
+    monkeypatch.delenv("VPS_HOST", raising=False)
     rep = run_setup(backend="router", json_out=True)
     assert "backend: router" in (home / "config.yaml").read_text()
     assert not (home / ".env").exists()
@@ -74,6 +75,115 @@ def test_setup_router_mode_no_env(tmp_path, monkeypatch):
     assert sn["deploy_steps"] and "run_remote.sh" in " ".join(sn["deploy_steps"])
     # terminal guidance must be self-contained: no repo-doc paths a dlx user can't open
     assert "docs/" not in json.dumps(rep)
+
+
+# ---- fleet auto-deploy (0.10.0): fake subprocess, no real git/ssh in unit tests ----
+
+def _fake_sub(monkeypatch, health=None):
+    """Patch setup_wizard.subprocess.run/which/sleep; return the recorded call list.
+    `health` = queue of healthz responses (None = unreachable); last one repeats."""
+    import types
+    from pathlib import Path
+
+    from gemini_mcp import setup_wizard as sw
+    calls: list = []
+    queue = list(health or [])
+    last = {"v": None}
+
+    def fake_run(cmd, **kw):
+        calls.append((list(cmd), kw))
+        ok = types.SimpleNamespace(returncode=0, stdout="", stderr="")
+        if cmd[0] == "git" and cmd[1] == "clone":
+            d = Path(cmd[-1])                     # make the clone "exist"
+            (d / ".git").mkdir(parents=True, exist_ok=True)
+            (d / "scripts").mkdir(exist_ok=True)
+            (d / "scripts" / "run_remote.sh").write_text("#!/bin/bash\n")
+            return ok
+        if cmd[0] == "ssh" and "healthz" in cmd[-1]:
+            h = queue.pop(0) if queue else last["v"]
+            last["v"] = h
+            if h is None:
+                return types.SimpleNamespace(returncode=1, stdout="", stderr="down")
+            return types.SimpleNamespace(returncode=0, stdout=json.dumps(h), stderr="")
+        return ok
+
+    monkeypatch.setattr(sw.subprocess, "run", fake_run)
+    monkeypatch.setattr(sw.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(sw.time, "sleep", lambda s: None)
+    return calls
+
+
+def _ok_health():
+    return {"ok": True, "version": __version__, "backend": "router"}
+
+
+def test_fleet_auto_deploy_provisions_and_pastes(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    calls = _fake_sub(monkeypatch, health=[None, _ok_health()])   # down → provisioned
+    rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST",
+                    projects_dir=str(tmp_path / "projects"), probe=False, json_out=True)
+    assert not rep.get("deploy_error")
+    assert rep["deploy"]["healthz"]["version"] == __version__
+    clones = [c for c, _ in calls if c[0] == "git" and c[1] == "clone"]
+    assert len(clones) == 2                            # both repos, folders were new
+    prov = [(c, kw) for c, kw in calls
+            if c[0] == "bash" and any("run_remote.sh" in part for part in c)]
+    assert prov and prov[0][1]["env"]["VPS_HOST"] == "YOUR_VPS_HOST" \
+        and prov[0][1]["env"]["VPS_USER"] == "root"
+    sn = rep["snippets"]
+    assert sn["paste_now"] is True                     # deployed ⇒ paste NOW
+    assert sn["ssh"]["args"][0] == "root@YOUR_VPS_HOST"      # real host baked in
+    assert sn["ssh"]["args"][1] == "/root/.local/bin/gemini-mcp"
+    assert not (tmp_path / "gmcp" / ".env").exists()   # no keys at rest locally
+
+
+def test_fleet_skips_provision_when_server_current(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    proj = tmp_path / "projects"
+    for name in ("gemini-mcp", "gemini-router"):       # existing clones → pull, no
+        (proj / name / ".git").mkdir(parents=True)     # 'already exists' fatal (note 3)
+    calls = _fake_sub(monkeypatch, health=[_ok_health()])
+    rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST", projects_dir=str(proj),
+                    probe=False, json_out=True)
+    assert not [c for c, _ in calls if c[0] == "bash"]               # no provisioner
+    assert not [c for c, _ in calls if c[0] == "git" and c[1] == "clone"]
+    assert [c for c, _ in calls if c[0] == "git" and c[1] == "-C"]   # pull happened
+    assert any("skipped" in line for line in rep["deploy"]["log"])
+    assert rep["snippets"]["paste_now"] is True
+
+
+def test_fleet_existing_non_git_dir_readable_error(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    proj = tmp_path / "projects"
+    (proj / "gemini-mcp").mkdir(parents=True)
+    (proj / "gemini-mcp" / "junk.txt").write_text("x")
+    _fake_sub(monkeypatch, health=[])
+    rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST", projects_dir=str(proj),
+                    probe=False, json_out=True)
+    assert "move it aside" in rep["deploy_error"]
+    assert rep["snippets"]["paste_now"] is False       # falls back to manual steps
+
+
+def test_fleet_keys_go_via_stdin_not_argv(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    calls = _fake_sub(monkeypatch, health=[_ok_health()])
+    rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST", keys=K1,
+                    projects_dir=str(tmp_path / "projects"), probe=False, json_out=True)
+    push = [(c, kw) for c, kw in calls if c[0] == "ssh" and "GEMINI_API_KEYS" in c[-1]]
+    assert push and push[0][1]["input"].startswith(K1)  # secret travels via stdin
+    assert all(K1 not in " ".join(c) for c, _ in calls)  # never in argv (ps-clean)
+    assert K1 not in json.dumps(rep)                     # report is secret-free
+    assert rep["fleet"]["key_ids"] == [key_id(K1)]
+
+
+def test_fleet_json_without_host_falls_back(tmp_path, monkeypatch):
+    _home(tmp_path, monkeypatch)
+    monkeypatch.delenv("VPS_HOST", raising=False)
+    _fake_sub(monkeypatch, health=[])
+    rep = run_setup(backend="router", json_out=True)
+    assert "--vps-host" in rep["deploy_error"]
+    assert rep["snippets"]["paste_now"] is False
+    assert rep["snippets"]["deploy_steps"]
 
 
 def test_setup_probe_via_respx(tmp_path, monkeypatch):
@@ -116,7 +226,7 @@ def test_bare_launch_logs_default_to_config_home(tmp_path, monkeypatch):
 
 
 def test_bootstrap_env_reads_config_home_dotenv(tmp_path, monkeypatch):
-    _home(tmp_path, monkeypatch)
+    home = _home(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GEMINI_MCP_ENV_FILE", raising=False)
     monkeypatch.delenv("GEMINI_API_KEYS", raising=False)
@@ -125,8 +235,10 @@ def test_bootstrap_env_reads_config_home_dotenv(tmp_path, monkeypatch):
     try:
         _bootstrap_env()
         assert os.environ.get("GEMINI_API_KEYS") == K1
-    finally:
-        os.environ.pop("GEMINI_API_KEYS", None)
+        from pathlib import Path
+        assert Path.cwd().resolve() == home.resolve()   # cwd anchored to config home
+    finally:                                               # (relative logs/config work
+        os.environ.pop("GEMINI_API_KEYS", None)            #  on bare ssh launches)
 
 
 def test_cli_setup_and_uninstall_json(tmp_path, monkeypatch, capsys):
@@ -151,6 +263,7 @@ def test_render_report_mode_guidance(tmp_path, monkeypatch):
 
     from gemini_mcp.setup_wizard import render_report
     _home(tmp_path, monkeypatch)
+    monkeypatch.delenv("VPS_HOST", raising=False)
     rep_d = run_setup(backend="direct", keys=K1, probe=False, json_out=True)
     buf = io.StringIO()
     render_report(rep_d, Console(file=buf, force_terminal=False, width=100))
@@ -158,11 +271,22 @@ def test_render_report_mode_guidance(tmp_path, monkeypatch):
     assert "Paste this into your MCP client config NOW" in txt
     assert "mcpServers" in txt and ".agents/mcp.json" in txt
 
+    # fleet, auto-deploy SUCCEEDED → same green paste-now block, real host inside
+    _fake_sub(monkeypatch, health=[_ok_health()])
+    rep_ok = run_setup(backend="router", vps_host="YOUR_VPS_HOST", force=True,
+                       projects_dir=str(tmp_path / "p2"), probe=False, json_out=True)
+    buf = io.StringIO()
+    render_report(rep_ok, Console(file=buf, force_terminal=False, width=100))
+    txt = buf.getvalue()
+    assert "Paste this into your MCP client config NOW" in txt and "root@YOUR_VPS_HOST" in txt
+    assert "Do NOT paste" not in txt and "<YOUR_VPS>" not in txt
+
+    # fleet, no host → yellow manual fallback (numbered, self-contained)
     rep_f = run_setup(backend="router", json_out=True, force=True)
     buf = io.StringIO()
     render_report(rep_f, Console(file=buf, force_terminal=False, width=100))
     txt = buf.getvalue()
-    assert "Do NOT paste" in txt and "run_remote.sh" in txt
+    assert "do NOT paste" in txt and "run_remote.sh" in txt
     assert "1." in txt and "<YOUR_VPS>" in txt
 
 

@@ -21,9 +21,12 @@ pnpm dlx @vernikr/gemini-mcp setup
 
 What it does — and what it does NOT:
 
-- asks one question (simple/direct vs fleet/router; pick **1**);
+- asks one question (simple/direct vs fleet/router; pick **1** unless you run a server);
 - takes keys through a **masked** prompt and stores them in `~/.config/gemini-mcp/.env`
   (mode `0600` — the only place keys live), plus a minimal `config.yaml`;
+- fleet (pick **2**): asks for your VPS host and projects folder, then does the server
+  side itself — clone/update repos, provision, push keys, healthcheck — and ends with
+  the same paste-once JSON (`--vps-host`, `--vps-user`, `--projects-dir` skip prompts);
 - probes keys live (listModels — zero quota spent) and prints fingerprints, never keys;
 - **prints** the ready `mcpServers` JSON for your client — it does **not** edit any
   client config itself (formats differ per client; you paste the block once).

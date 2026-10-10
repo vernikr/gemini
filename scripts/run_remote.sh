@@ -8,6 +8,11 @@
 #   bash scripts/run_remote.sh status   # systemctl status + quota table
 #   bash scripts/run_remote.sh logs     # tail daemon journal + app.log
 #
+# NOTE (0.10.0+): the systemd unit runs the RELEASED package via `uv tool`
+# (~/.local/bin/gemini-mcp) — VERSION upgrades flow through push-CD (git tag →
+# release.yml deploy job → deploy-tools). setup/deploy here sync SOURCE + config
+# (config.yaml, scripts, prompts) and keep the tool binary at the latest release.
+#
 # Env: VPS_USER — SSH login user (default root: the VPS has NO 'agent' user — verified
 # on live server 2026-10-08); APP_USER — service/venv owner (default = VPS_USER; set
 # APP_USER=<user> later to run under a dedicated non-root user if one is created).
@@ -48,8 +53,9 @@ case "$cmd" in
     ;;
   status)
     ssh -t "$DEST" "systemctl --no-pager status gemini-mcp.service | head -8; \
-      sudo -u $APP_USER bash -c 'set -a; . /opt/apps/gemini-mcp/.env; set +a; \
-      cd /opt/apps/gemini-mcp && .venv/bin/gemini-mcp quota'"
+      sudo -u $APP_USER env HOME=\$(getent passwd $APP_USER | cut -d: -f6) bash -c \
+      'set -a; . /opt/apps/gemini-mcp/.env; set +a; cd /opt/apps/gemini-mcp && \
+      \"\$HOME/.local/bin/gemini-mcp\" quota'"
     ;;
   logs)
     ssh -t "$DEST" "sudo journalctl -u gemini-mcp -n 40 --no-pager; \
