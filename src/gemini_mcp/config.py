@@ -95,6 +95,11 @@ def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConf
     app = AppCfg.model_validate({k: raw[k] for k in
                                  ("pipeline", "logging", "server", "thinking",
                                   "routing", "ingest", "backend") if k in raw})
+    if not raw:
+        # bare launch (client JSON pasted without `setup`): cwd is arbitrary — MCP
+        # clients spawn with cwd=$HOME — so keep rotating logs out of ./logs (~/logs)
+        # and beside the state.db that direct mode already puts in the config home
+        app.logging.dir = str(config_home() / "logs")
     router_cfg = RouterConfig.load(os.environ.get("GEMINI_ROUTER_CONFIG"),
                                    **raw.get("router", {}))
     return app, router_cfg

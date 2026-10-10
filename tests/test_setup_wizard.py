@@ -97,6 +97,16 @@ def test_load_all_picks_config_home(tmp_path, monkeypatch):
     assert app.backend == "direct"
 
 
+def test_bare_launch_logs_default_to_config_home(tmp_path, monkeypatch):
+    """JSON-only wiring (no `setup`, no config.yaml anywhere): logs must not land in
+    the arbitrary spawn cwd (clients use $HOME) — they belong beside state.db."""
+    home = _home(tmp_path, monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    app, _ = load_all(None)
+    assert app.logging.dir == str(home / "logs")
+    assert app.backend == "auto"                # resolve_mode → direct (no state)
+
+
 def test_bootstrap_env_reads_config_home_dotenv(tmp_path, monkeypatch):
     _home(tmp_path, monkeypatch)
     monkeypatch.chdir(tmp_path)

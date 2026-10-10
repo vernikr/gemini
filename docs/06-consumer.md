@@ -28,8 +28,17 @@ Undo everything: `… uninstall --yes`.
 
 ## 2. Add to your MCP client (JSON)
 
-The gateway auto-discovers `~/.config/gemini-mcp/` — **no env vars in the client
-config**. `setup` prints the exact pinned snippet; the forms below are what it prints.
+`setup` **prints** the JSON block but never edits client configs itself (formats differ
+per client; auto-write is planned as M7.5). Two wiring forms:
+
+- **After the wizard** (option A): keys already live in `~/.config/gemini-mcp/.env` —
+  the block below needs no env.
+- **Without the wizard** (option B, JSON-only): add `"env": {"GEMINI_API_KEYS":
+  "AIza…key1,AIza…key2"}` to the server entry — that alone is sufficient; backend
+  auto-resolves to `direct`, logs+ledger still land in `~/.config/gemini-mcp/`
+  (bare-launch default). Trade-off: keys sit in the client config file, not a 0600 .env.
+
+The gateway auto-discovers `~/.config/gemini-mcp/` — **no other env vars needed**.
 
 ### Freebuff Desktop — `~/.agents/mcp.json`
 
