@@ -84,3 +84,11 @@ jobs:
             sleep 30
           done
           test "$ok" = 1 || { echo "npm smoke failed for $V"; exit 1; }
+
+  deploy:
+    needs: pypi                             # deploy only what is already on PyPI
+    uses: vernikr/browser-agent/.github/workflows/deploy-ssh.yml@main
+    with:
+      app: gemini-mcp                       # → /etc/deploy-tools.d/gemini-mcp.conf on the VPS
+      tag: ${{ github.ref_name }}
+    secrets: inherit                        # DEPLOY_SSH_KEY / DEPLOY_HOST / DEPLOY_USER
