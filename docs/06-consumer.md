@@ -29,7 +29,11 @@ Undo everything: `… uninstall --yes`.
 ## 2. Add to your MCP client (JSON)
 
 `setup` **prints** the JSON block but never edits client configs itself (formats differ
-per client; auto-write is planned as M7.5). Two wiring forms:
+per client; auto-write is planned as M7.5). Since 0.9.1 the printout is mode-aware:
+direct mode says **paste NOW** and shows the full `{"mcpServers": …}` wrapper (npx form
+when `npx` is on PATH, uvx-pinned otherwise, plus where each client's config lives);
+fleet/router mode says **do NOT paste yet** and lists the concrete server-deploy steps
+first, then the ssh snippet. Two wiring forms:
 
 - **After the wizard** (option A): keys already live in `~/.config/gemini-mcp/.env` —
   the block below needs no env.

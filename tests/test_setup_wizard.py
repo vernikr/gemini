@@ -37,8 +37,12 @@ def test_setup_direct_writes_env_0600_and_config(tmp_path, monkeypatch):
     assert set(rep["created"]) >= {str(env), str(cfg)}
     blob = json.dumps(rep)                      # report is secret-free
     assert K1 not in blob and K2 not in blob
-    assert rep["snippets"]["generic_mcp_json"]["args"][:2] == [
-        "--from", f"gemini-mcp-gateway=={__version__}"]
+    sn = rep["snippets"]
+    assert sn["paste_now"] is True
+    assert sn["uvx_pinned"]["args"][:2] == ["--from", f"gemini-mcp-gateway=={__version__}"]
+    assert sn["pnpm_npx"] == {"command": "npx",
+                              "args": ["-y", "@vernikr/gemini-mcp", "stdio"]}
+    assert "claude_desktop" in sn["paste_where"]
 
 
 def test_setup_idempotent_then_force(tmp_path, monkeypatch):
@@ -65,7 +69,11 @@ def test_setup_router_mode_no_env(tmp_path, monkeypatch):
     rep = run_setup(backend="router", json_out=True)
     assert "backend: router" in (home / "config.yaml").read_text()
     assert not (home / ".env").exists()
-    assert rep["snippets"]["freebuff_agents_mcp_json"]["command"] == "ssh"
+    sn = rep["snippets"]
+    assert sn["paste_now"] is False and sn["ssh"]["command"] == "ssh"
+    assert sn["deploy_steps"] and "run_remote.sh" in " ".join(sn["deploy_steps"])
+    # terminal guidance must be self-contained: no repo-doc paths a dlx user can't open
+    assert "docs/" not in json.dumps(rep)
 
 
 def test_setup_probe_via_respx(tmp_path, monkeypatch):
@@ -132,3 +140,35 @@ def test_cli_setup_and_uninstall_json(tmp_path, monkeypatch, capsys):
     assert rc == 2 and json.loads(capsys.readouterr().out)["error"] == "confirm_required"
     rc = main(["uninstall", "--yes", "--json"])
     assert rc == 0 and len(json.loads(capsys.readouterr().out)["removed"]) == 2
+    os.environ.pop("GEMINI_API_KEYS", None)  # _bootstrap_env loaded setup's .env
+
+
+def test_render_report_mode_guidance(tmp_path, monkeypatch):
+    """The terminal must say WHEN to paste: direct = now, fleet = after deploy."""
+    import io
+
+    from rich.console import Console
+
+    from gemini_mcp.setup_wizard import render_report
+    _home(tmp_path, monkeypatch)
+    rep_d = run_setup(backend="direct", keys=K1, probe=False, json_out=True)
+    buf = io.StringIO()
+    render_report(rep_d, Console(file=buf, force_terminal=False, width=100))
+    txt = buf.getvalue()
+    assert "Paste this into your MCP client config NOW" in txt
+    assert "mcpServers" in txt and ".agents/mcp.json" in txt
+
+    rep_f = run_setup(backend="router", json_out=True, force=True)
+    buf = io.StringIO()
+    render_report(rep_f, Console(file=buf, force_terminal=False, width=100))
+    txt = buf.getvalue()
+    assert "Do NOT paste" in txt and "run_remote.sh" in txt
+    assert "1." in txt and "<YOUR_VPS>" in txt
+
+
+def test_bare_launch_without_keys_points_to_setup(tmp_path, monkeypatch, capsys):
+    """Fail-fast on missing keys must name the fix command, not just the cause."""
+    _home(tmp_path, monkeypatch)
+    rc = main(["quota", "--json"])
+    err = capsys.readouterr().err
+    assert rc == 2 and "no API keys" in err and "gemini-mcp setup" in err

@@ -27,19 +27,36 @@ ENV_HEADER = ("# gemini-mcp credentials — written by `gemini-mcp setup` (mode 
 CFG_HEADER = "# gemini-mcp app config — written by `gemini-mcp setup`.\n"
 
 
-def _client_snippets(backend: str) -> dict[str, dict]:
-    core = {"command": "uvx",
-            "args": ["--from", f"gemini-mcp-gateway=={__version__}", "gemini-mcp", "stdio"]}
+def _client_snippets(backend: str) -> dict:
+    """Structured wiring guidance for the report/terminal. Direct = paste NOW (two
+    equivalent forms, renderer picks by what's on PATH); fleet = deploy FIRST, paste
+    later — with concrete terminal steps instead of repo-doc references (dlx users
+    don't have the repo)."""
     if backend == "direct":
-        return {"generic_mcp_json": core,
-                "claude_desktop": core,
-                "cursor": core,
-                "freebuff_agents_mcp_json": core}
-    return {"freebuff_agents_mcp_json": {
-        "command": "ssh",
-        "args": ["root@<YOUR_VPS>", "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"]},
-        "note": ("fleet mode runs on your server; see docs/04-plan.md M4 deploy + "
-                 "docs/freebuff-wiring.md for the HTTP-tunnel variant")}
+        return {"paste_now": True,
+                "pnpm_npx": {"command": "npx",
+                             "args": ["-y", "@vernikr/gemini-mcp", "stdio"]},
+                "uvx_pinned": {"command": "uvx",
+                               "args": ["--from", f"gemini-mcp-gateway=={__version__}",
+                                        "gemini-mcp", "stdio"]},
+                "paste_where": {
+                    "freebuff": "~/.agents/mcp.json",
+                    "claude_desktop": "~/Library/Application Support/Claude/"
+                                      "claude_desktop_config.json",
+                    "cursor": "~/.cursor/mcp.json"}}
+    return {"paste_now": False,
+            "ssh": {"command": "ssh",
+                    "args": ["root@<YOUR_VPS>",
+                             "/opt/apps/gemini-mcp/.venv/bin/gemini-mcp", "stdio"]},
+            "deploy_steps": [
+                "on your workstation: git clone https://github.com/vernikr/gemini-mcp "
+                "(and https://github.com/vernikr/gemini-router beside it)",
+                "VPS_HOST=<your-server-ip> VPS_USER=root bash scripts/run_remote.sh "
+                "setup    (rsync + provision + systemd unit; idempotent)",
+                "put your Gemini keys on the SERVER: GEMINI_API_KEYS=AIza…,AIza… in "
+                "/opt/apps/gemini-mcp/.env (chmod 600; setup_server.sh prompts/imports)",
+                "THEN paste the ssh snippet below into your client config, replacing "
+                "<YOUR_VPS>, and restart the client"]}
 
 
 async def _probe_keys(keys: list[str]) -> list[dict]:
@@ -127,10 +144,14 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
             report["probe"] = {"error": str(e)[:200],
                                "hint": "keys are saved; re-check with `gemini-mcp doctor`"}
     report["snippets"] = _client_snippets(backend)
-    report["next"] = ("paste a snippet into your MCP client config, then ask the agent "
-                      "to call quota_status" if backend == "direct" else
-                      "deploy the fleet side first (docs/04-plan.md M4), then paste the "
-                      "ssh snippet")
+    report["next"] = (
+        "paste the snippet below into your MCP client config NOW (one time), restart "
+        "the client fully; the first call takes ~10–20 s (one-time dependency "
+        "resolve). Verify: ask the agent to call the quota_status tool."
+        if backend == "direct" else
+        "do NOT paste into your client yet — first deploy the server side with the "
+        "numbered steps below (keys live on the server, none on this machine), then "
+        "paste the ssh snippet. Fleet quota/calls/doctor run ON THE SERVER via ssh.")
     return report
 
 
@@ -181,10 +202,25 @@ def render_report(rep: dict, console) -> None:
                       + (f", {row['models']} models" if row.get("models") else ""))
     if isinstance(rep.get("probe"), dict):
         console.print(f"  [yellow]probe skipped: {rep['probe'].get('error')}[/yellow]")
-    snip = (rep.get("snippets") or {}).get("generic_mcp_json") \
-        or (rep.get("snippets") or {}).get("freebuff_agents_mcp_json")
-    if snip:
-        console.print("[bold]client snippet[/bold] (mcpServers entry):")
-        console.print(json.dumps({"gemini": snip}, indent=1))
+    snip = rep.get("snippets") or {}
+    if snip.get("paste_now"):
+        import shutil
+        primary = "pnpm_npx" if shutil.which("npx") else "uvx_pinned"
+        alt = "uvx_pinned" if primary == "pnpm_npx" else "pnpm_npx"
+        console.print("[bold green]▶ Paste this into your MCP client config NOW[/bold green] "
+                      "(one time — it is the whole wiring):")
+        console.print(json.dumps({"mcpServers": {"gemini": snip[primary]}}, indent=1))
+        pw = snip.get("paste_where") or {}
+        for name, path in pw.items():
+            console.print(f"    [dim]{name}:[/dim] {path}")
+        console.print(f"  [dim]equivalent alternative form: "
+                      f"{json.dumps(snip[alt], ensure_ascii=False)}[/dim]")
+    elif snip.get("ssh"):
+        console.print("[bold yellow]▶ Do NOT paste into your client yet.[/bold yellow] "
+                      "Fleet mode: deploy the server first —")
+        for i, step in enumerate(snip.get("deploy_steps", []), 1):
+            console.print(f"  {i}. {step}")
+        console.print("  [bold]then[/bold] paste (replace <YOUR_VPS>):")
+        console.print(json.dumps({"mcpServers": {"gemini": snip["ssh"]}}, indent=1))
     if rep.get("next"):
         console.print(f"[dim]next: {rep['next']}[/dim]")

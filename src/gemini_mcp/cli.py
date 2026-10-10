@@ -357,6 +357,11 @@ def main(argv: list[str] | None = None) -> int:
             return _run_doctor(app_cfg, router_cfg, args)
     except Exception as e:  # noqa: BLE001 — CLI must never traceback at the user
         console.print(f"[red]error:[/red] {redact(str(e))}")
+        if "no API keys" in str(e):
+            console.print("[yellow]fix:[/yellow] run [bold]gemini-mcp setup[/bold] — or "
+                          "provide keys via --keys / --keys-file / "
+                          "GEMINI_MCP_KEYS_FILE / GEMINI_API_KEYS "
+                          "(e.g. in ~/.config/gemini-mcp/.env)")
         return 2
     return 2
 
