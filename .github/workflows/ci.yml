@@ -12,6 +12,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+      - run: python3 scripts/check_secrets.py  # fixtures carry DUMMY, never a live key
       - run: uvx ruff check src tests        # no deps needed for lint
   test:
     runs-on: ubuntu-latest

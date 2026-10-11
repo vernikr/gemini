@@ -52,3 +52,29 @@ def test_help_lists_the_recently_added_commands(capsys):
     assert e.value.code == 0
     for word in ("keys", "smoke", "prune", "doctor"):
         assert word in out
+
+
+# ------------------------------------------------------------------ the secrets guard
+def test_the_guard_flags_a_real_shaped_key_and_accepts_marked_fakes(tmp_path):
+    """The guard exists because on 2026-10-11 two real keys were committed into a public
+    test fixture and the vendor reported the first as leaked within the hour. The rule for
+    fixtures: real shape, DUMMY marker. Pinned both directions."""
+    from gemini_mcp import secrets_guard as guard
+
+    # built at runtime so the guard scanning THIS file stays happy (it is its own test)
+    sample = "AIzaSy" + "Xk3vQpZ1mN8rT4bY6wL0cD2fG7hJ9sA5e"
+    assert guard.scan_text(f'K = "{sample}"', "f") != []
+    assert guard.scan_text('K = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"', "f") == []   # split: no literal
+    gh = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"
+    assert guard.scan_text(f"K = \"{gh}\"", "f") != []
+    assert guard.scan_text('K = "AIzaSyDUMMYfake_for_tests_00000000"', "f") == []
+    assert guard.scan_text('K = "AQ.DUMMYfake_for_tests_000000000000000"', "f") == []
+    assert guard.scan_text("# a comment mentioning AIza… and ghp_…", "f") == []
+
+
+def test_the_repo_itself_is_clean(capsys):
+    """Runs the same scan the CI step runs — over every tracked file."""
+    from gemini_mcp import secrets_guard as guard
+
+    assert guard.main([]) == 0
+    assert "clean" in capsys.readouterr().out

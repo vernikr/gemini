@@ -15,8 +15,8 @@ import pytest
 from gemini_mcp import keys_cmd
 from gemini_mcp.cli import main
 
-K1 = "AIzaSyDUMMY_REDACTED_FOR_PUBLIC_HISTORY"
-K2 = "AIzaSyDUMMY_REDACTED_FOR_PUBLIC_HISTORY"
+K1 = "AIzaSyDUMMYfake_pool_key_for_tests_0"
+K2 = "AQ.DUMMYfake_spare_key_for_tests_00000000000"
 
 
 @pytest.fixture()

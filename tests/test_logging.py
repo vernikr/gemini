@@ -21,7 +21,8 @@ from gemini_mcp.progress import ProgressEmitter
 
 
 def test_redact_patterns_and_secrets():
-    out = redact("key AIzaSyDUMMY_REDACTED_FOR_PUBLIC_HISTORY and AIzaSyDUMMY_REDACTED_FOR_PUBLIC_HISTORY"
+    out = redact("key AIzaSyDUMMYtestvalue1234567890gh and "
+                 "ghp_DUMMYghpvalueabcdefghijklmnopqrstuvwxyz012345"
                  " token longsecretvalue", ["longsecretvalue"])
     assert "AIza" not in out and "ghp_" not in out and "longsecretvalue" not in out
     assert out.count("***") >= 3
