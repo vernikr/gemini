@@ -138,7 +138,13 @@ ssh root@YOUR_VPS_HOST
 sudo systemctl status gemini-mcp          # daemon (HTTP)
 ~/.local/bin/gemini-mcp quota    # what's left, per key×model (on the VPS, as its user)
 ~/.local/bin/gemini-mcp logs -f  # live app log
+~/.local/bin/gemini-mcp keys    # the key pool: fingerprints, where it lives
+gemini-mcp keys add <key>       # add a key: validated, probed free, service restarted
 ```
+
+`gemini-mcp keys` edits the env file the daemon actually reads (the unit's
+`EnvironmentFile`) and restarts the service — the same command works on a workstation,
+where it writes the wizard's `.env` instead.
 
 Conventions: English in files, Conventional Commits, SemVer, docs updated with every
 functional change (see `AGENTS.md`).

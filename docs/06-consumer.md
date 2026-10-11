@@ -62,6 +62,20 @@ short numbered manual steps. Two wiring forms:
 Keys-file format: comma/whitespace/newline separated, `#` comments ignored, deduped.
 `setup` also accepts `--keys-file` (merged with `--keys`).
 
+### Growing or rotating the pool later
+
+```bash
+gemini-mcp keys                 # where the pool lives + fingerprints (never raw keys)
+gemini-mcp keys add <key>…      # validate → live probe (listModels, free) → write 0600
+gemini-mcp keys remove <n|fp>   # by index or fingerprint; the last key needs --force
+```
+
+The command finds the right file by itself — the systemd unit's `EnvironmentFile` on a
+server, the wizard's `.env` on a workstation — and restarts the service when there is one
+(`--no-restart` skips that). Several keys = several times the daily allowance, because
+quota is counted per key × model; the router spreads calls across the pool by remaining
+budget and steps past an exhausted or rejected key on its own.
+
 The gateway auto-discovers `~/.config/gemini-mcp/` — **no other env vars needed**.
 
 ### Freebuff Desktop — `~/.agents/mcp.json`

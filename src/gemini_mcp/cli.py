@@ -335,10 +335,30 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true", help="print the quota table as JSON")
     p = sub.add_parser("doctor", help="router + mcp health check")
     p.add_argument("--offline", action="store_true")
+    p = sub.add_parser("keys", help="manage the API-key pool (writes the daemon's env "
+                                    "file, probes new keys free, restarts the service)")
+    p.add_argument("action", nargs="?", default="list", choices=["list", "add", "remove"])
+    p.add_argument("items", nargs="*",
+                   help="keys to add, or refs (index / fingerprint prefix / the key) to "
+                        "remove")
+    p.add_argument("--env-file", help="override the env file to edit (default: the systemd "
+                                      "unit's EnvironmentFile, else the wizard config home)")
+    p.add_argument("--check", action="store_true",
+                   help="list: probe every key live (listModels — free, no RPD)")
+    p.add_argument("--offline", action="store_true", help="skip the live probe")
+    p.add_argument("--no-restart", action="store_true",
+                   help="write the pool but leave the service on its old keys")
+    p.add_argument("--force", action="store_true",
+                   help="keep a key that failed the probe / remove the last key")
+    p.add_argument("--json", action="store_true")
 
     args = ap.parse_args(argv)
     if args.cmd in ("setup", "uninstall"):       # works even with a broken/absent config
         return _run_setup(args) if args.cmd == "setup" else _run_uninstall(args)
+    if args.cmd == "keys":                       # file-level: never needs the app config
+        from .keys_cmd import run as run_keys
+
+        return run_keys(args)
     try:
         from .config import parse_keys
         over: dict = {}
