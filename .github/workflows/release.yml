@@ -85,28 +85,22 @@ jobs:
       - name: Consumer E2E from the public registries
         run: |
           V="${GITHUB_REF_NAME#v}"
-          # Registry metadata first, install second. The old loops retried the INSTALL,
-          # which paid a full re-resolve (and 30 s of sleep) for every attempt while the
-          # registries were still propagating: 12× for PyPI, 16× for npm. One cheap curl
-          # per try answers "is the version there yet", and the install runs once — after
-          # it can only succeed.
-          live() {          # $1 = URL, $2 = grep pattern, $3 = registry name
-            for _ in $(seq 1 60); do
-              curl -fsS "$1" 2>/dev/null | grep -qiE "$2" && return 0
-              sleep 10
+          # The gate is the REAL consumer command, retried. v0.20.0 taught us the JSON
+          # API can be fresh while uv's view of /simple/ is not; v0.20.1 taught us a
+          # curl of the /simple/ HTML page can be fresh while uv's JSON representation
+          # of that same page (different Fastly cache object) is not. Metadata polls
+          # therefore never decide anything again — a failed resolve costs ~1 s, so
+          # retry the command that a consumer actually runs, and stop on its success.
+          try() {           # $1 = registry name; rest = consumer command
+            local name="$1"; shift
+            for i in $(seq 1 40); do
+              if "$@"; then echo "$name: served $V on attempt $i"; return 0; fi
+              sleep 15
             done
-            echo "::error::$3 did not serve $V within 10 minutes"; return 1
+            echo "::error::$name did not serve $V within 10 minutes"; return 1
           }
-          # Poll the SIMPLE index, not the JSON API: uv resolves through
-          # /simple/<pkg>/, which is a different CDN cache. Tag v0.20.0 failed the smoke
-          # job exactly there — the JSON API already said 0.20.0 while uv still saw the
-          # previous page ("No solution found when resolving tool dependencies").
-          live "https://pypi.org/simple/gemini-mcp-gateway/" \
-               "gemini[_-]mcp[_-]gateway-${V//./\\.}" PyPI
-          uvx --refresh --from "gemini-mcp-gateway==$V" gemini-mcp --version
-          live "https://registry.npmjs.org/@vernikr%2Fgemini-mcp" \
-               "\"$V\"" npm
-          npx -y "@vernikr/gemini-mcp@$V" --version
+          try PyPI uvx --refresh --from "gemini-mcp-gateway==$V" gemini-mcp --version
+          try npm  npx -y "@vernikr/gemini-mcp@$V" --version
 
   deploy:
     needs: pypi                             # deploy only what is already on PyPI
