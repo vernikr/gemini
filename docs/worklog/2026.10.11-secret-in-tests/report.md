@@ -22,7 +22,10 @@ no secret scan; nothing else looked at file contents, so the commit went straigh
 ## Blast radius
 
 - Public repo history: commits `4231254`, `38b5dc6`, `0552ebd`, tags `v0.19.0`/`v0.20.0`.
-- PyPI sdists `0.19.0` and `0.20.0` (sdist includes `tests/`). Wheels are clean.
+- PyPI sdists `0.19.0` and `0.20.0` (sdist includes `tests/`). Wheels are clean. Verified by
+  downloading every published sdist (`0.18.0` → `0.20.1`) and fingerprinting the matches:
+  `0.18.x` carries only shaped fakes, `0.19.0`/`0.20.0` carry both dead keys,
+  and `0.20.1` carries nine shaped literals, all of them DUMMY-marked fixtures.
 - Both keys are dead; the pool is empty until a new key is added. Out-of-band copies are
   inert, and PyPI files cannot be edited (nor need to be — the credentials they contain are
   revoked).
@@ -38,6 +41,26 @@ no secret scan; nothing else looked at file contents, so the commit went straigh
 - Tests pin both directions: a real-shaped literal is flagged, a DUMMY-marked one is not,
   and the repository scan must be clean (167 tests).
 - `AGENTS.md` states the rule where an agent reads it before touching fixtures.
+
+## Closure of the code side (0.20.1)
+
+Released from this worklog's commit: fixture fakes, the guard, the CI wiring, `AGENTS.md`.
+PyPI + npm serve `0.20.1` (npm `latest` → `0.20.1`), the VPS runs `0.20.1` with the unit
+active, and the five-job release run is green end to end. The release pipeline itself grew
+a second lesson in the same chunk — see the smoke fix below.
+
+### The smoke job, and why metadata polls were the wrong gate (twice)
+
+`v0.20.0`: the smoke job polled the PyPI **JSON API** and then ran `uvx`; uv resolves
+through `/simple/`, a different Fastly cache object, so the job failed while the JSON API
+was already current. The fix polled `/simple/` with `curl` instead.
+
+`v0.20.1`: that fixed poll passed, and `uvx` failed again — `curl` received the **HTML**
+representation of `/simple/`, while uv reads the **JSON** one, cached separately. Two
+caches, two costumes, one mistake: asking a proxy about the answer instead of asking the
+question. The job now retries the real consumer commands (`uvx … --version`,
+`npx … --version`) with a ten-minute budget and keeps no metadata pre-checks at all.
+Verified by hand from a clean machine: both commands print `gemini-mcp 0.20.1`.
 
 ## Outstanding
 
