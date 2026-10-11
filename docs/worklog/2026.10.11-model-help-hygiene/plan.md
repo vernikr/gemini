@@ -10,5 +10,7 @@ string. This is only an agent-facing hint fix, with no routing changes.
 The router's separate README/SPEC chain description is corrected in that project's
 `docs/worklog/2026.10.11-model-doc-hygiene/`. Do not duplicate its prose here.
 
-Gateway patch 0.24.2: full tests, lint and secrets guard before tag. Publication
-and production version verification recorded after the release.
+Gateway patch 0.24.2: 204 tests, lint and secrets guard green; release pipeline
+test/PyPI/npm/deploy/smoke all green. Production daemon is active on 0.24.2.
+Router README/SPEC docs correction pushed separately. No quota-consuming probe
+needed for a tool-description change.
