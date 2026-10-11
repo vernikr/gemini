@@ -29,3 +29,15 @@ and production raw MCP calls are in scope. Freebuff Desktop's final *agent prose
 not observable from this workspace: no installed/running host agent here. Keep the
 external UI check in b03 open; do not equate MCP's tool payload with proof that an
 uncontrolled host agent will obey it.
+
+## Published and checked
+
+Gateway v0.24.1: 204 tests + ruff + secret guard green; test, PyPI, npm, deploy and
+smoke all green; production daemon 0.24.1 active. Real MCP wire: an invalid upload
+ticket returned `⛔️` in its tool error. A two-text-file `analyze_files` job polled
+for 133s; poll pct never moved backwards or reached 100 while running. Its three
+`done` stages were 20% (file 1), 25% (file 2) and 100% (whole job); the final result
+listed all distinct models and answered both files. The long run had waits and
+switches, reported as distinct episodes, not failed requests. Freebuff's *chat
+wording* is still unobserved (b03); no claim of host-agent confirmation.
+
