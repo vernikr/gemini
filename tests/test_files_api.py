@@ -223,3 +223,30 @@ async def test_missing_pdfinfo_never_blocks_a_pdf(tmp_path, monkeypatch):
     up_id = await _uploaded(deps, "report.pdf", PDF_BYTES)
     out = await _analyze(deps, up_id)
     assert out["meta"]["file"]["via"] == "files_api"
+
+
+# ------------------------------------------------------------------ the report line
+def test_routing_noise_is_not_a_rough_edge():
+    """The `routing` event's message embeds its detail dict, and that dict has a key named
+    `wait` — so a plain text scan flagged EVERY live request as rough and made the signal
+    worthless. Stages are the structured truth; the probe that found this ran against the
+    production daemon (worklog report, 2026-10-11)."""
+    from gemini_mcp.tools import _report
+
+    clean = {"backend": "router", "route": "optimal", "model": "gemini-3.6-flash",
+             "requests_spent": 1, "elapsed_s": 3.3,
+             "progress_trace": [
+                 {"stage": "uploaded", "message": "provider file files/x ready · 560 tokens"},
+                 {"stage": "router:routing",
+                  "message": "? {'est_tokens': 585, 'wait': True, 'overflow': 'lite+gemma'}"},
+                 {"stage": "router:dispatch", "message": "dispatch → gemini-3.6-flash"},
+                 {"stage": "router:ok", "message": "ok ← gemini-3.6-flash in=541 out=31"}]}
+    assert "clean run" in _report(clean) and "rough_edges" not in _report(clean)
+
+    rough = {**clean, "progress_trace": clean["progress_trace"] + [
+        {"stage": "router:waiting", "message": "waiting 8.4s for gemini-3.8-flash RPM window"}]}
+    assert "rough_edges=1" in _report(rough)
+
+    switched = {**clean, "progress_trace": clean["progress_trace"] + [
+        {"stage": "router:switch", "message": "switch (reason: unavailable)"}]}
+    assert "rough_edges=1" in _report(switched)

@@ -49,15 +49,21 @@ class Deps:
     backend: str = "router"                 # 'router' (fleet) | 'direct' (AI Studio)
 
 
-_ROUGH_KEYS = ("retry", "retrying", "wait", "503", "fallback", "failed",
-               "cooldown", "overload")
+# What counts as a rough edge, by STAGE first: text matching alone was fooled by the
+# `routing` event, whose message embeds its detail dict — and that dict has a key called
+# `wait`, so every live request reported an edge. Stages are the structured truth; the
+# keyword scan only covers the non-router messages.
+_ROUGH_STAGES = ("router:retry", "router:waiting", "router:switch", "router:pacing",
+                 "router:overflow", "router:quota_exhausted")
+_ROUGH_KEYS = ("retry", "503", "fallback", "failed", "cooldown", "overload", "timeout")
 
 
 def _report(meta: dict) -> str:
     """One-line report the agent MUST relay to chat — travels in the payload because
     clients truncate tool descriptions (postmortem p01 follow-up)."""
     rough = [e for e in meta.get("progress_trace") or []
-             if any(k in (e.get("message") or "").lower() for k in _ROUGH_KEYS)]
+             if e.get("stage") in _ROUGH_STAGES
+             or any(k in (e.get("message") or "").lower() for k in _ROUGH_KEYS)]
     parts = [f"backend={meta.get('backend', '?')}",
              f"route={meta.get('route', '?')}",
              f"thinking={meta.get('thinking_level', '?')}",
@@ -69,7 +75,7 @@ def _report(meta: dict) -> str:
     if failed:
         parts.append(f"failed_chunks={failed}")
     if rough:
-        parts.append(f"rough_edges={len(rough)} (retries/waits/fallbacks — details in "
+        parts.append(f"rough_edges={len(rough)} (retries/waits/switches — details in "
                      f"meta.progress_trace)")
     else:
         parts.append("clean run")
