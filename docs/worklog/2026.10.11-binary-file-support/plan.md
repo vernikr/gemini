@@ -76,3 +76,16 @@ and the evidence live in `report.md` in this folder — not repeated here.
 - Documentation kept true: `docs/02-requirements.md` gains the file-input requirement,
   `docs/03-architecture.md` §10 states the routing rule, `docs/06-consumer.md` and
   `docs/freebuff-wiring.md` describe the flow the agent sees.
+
+## Measured constraints added 2026-10-11 evening (before starting C2)
+
+- **File-capable models only.** gemini-3.5-flash-lite → 500, gemini-3-flash-preview → 400,
+  gemma-4-31b-it → 400 on a Files API part that gemini-3.6-flash/3.8-flash serve fine
+  (router 0.1.15 enforces this: file jobs stay on the chain, a file-blind model is
+  remembered, and a file-blind candidate set raises its own error).
+- **Budget is per key × model.** The fresh key's 3.6-flash RPD was exhausted while 3.8/3.7
+  kept serving: a group packer must read `rpd_left` from the ledger per pair, never "per key".
+- **PDF price is stable and measured**: a 3-page text PDF at `high` = 3360 tokens in both
+  the gateway's count and the provider's `countTokens` (1120/page). Images at `high` = 1089.
+- **The upload is per key** (separate accounts), so a group whose files were uploaded under
+  one key can only be packed for that key's models — exactly the `pins` rule C1 shipped.
