@@ -6,7 +6,12 @@ waits inline up to wait_seconds; on timeout the caller returns a running-ticket 
 job keeps computing server-side. fetch(key, wait_seconds) re-attaches and returns the
 final payload, 'running' again, or the original error. In-memory, single-process (the
 daemon is one uvicorn worker); request_id idempotency in the router cache makes a
-post-restart retry cheap."""
+post-restart retry cheap.
+
+FR-G1 job visibility: submit(key, ..., live=dict) attaches the same dict the job's
+ProgressEmitter mirrors its state into; every running ticket carries it as 'live'
+(phase/eta_s/model/key_id/latest stage line), so a poller sees WHAT the job is doing
+without subscribing to progress notifications."""
 from __future__ import annotations
 
 import asyncio
@@ -21,13 +26,18 @@ class JobManager:
         self.log = logger or logging.getLogger("gemini_mcp")
         self._jobs: dict[str, dict] = {}
 
-    async def submit(self, key: str, factory, wait_seconds: float | None):
+    async def submit(self, key: str, factory, wait_seconds: float | None,
+                     live: dict | None = None):
         """factory() -> awaitable payload. Returns (status, payload):
-        status: 'done' | 'running' (ticket) | 'error'."""
+        status: 'done' | 'running' (ticket) | 'error'.
+        live: shared dict the job's emitter keeps current (FR-G1)."""
         j = self._jobs.get(key)
         if j is None:
-            j = {"state": "running", "created": time.time(),
+            j = {"state": "running", "created": time.time(), "live": live,
                  "task": asyncio.create_task(self._run(key, factory()))}
+            if live is not None:
+                live.setdefault("phase", "starting")
+                live.setdefault("pct", 0.0)
             self._jobs[key] = j
             self.log.info("job %s submitted (inline wait %.0fs)", key, wait_seconds or 0)
         else:
@@ -74,13 +84,34 @@ class JobManager:
         if j["state"] == "error":
             return "error", {"status": "error", "error": "job_failed",
                              "detail": j.get("error", "unknown"), "request_id": key}
-        return "running", {
+        ticket = {
             "status": "running", "request_id": key,
             "elapsed_s": round(time.time() - j["created"], 1),
             "poll": (f"job still computing server-side; call analyze_result with "
                      f"request_id='{key}' (it waits up to its wait_seconds per call) "
                      f"until you receive the final result — do not resubmit, quota is "
                      f"already committed")}
+        live = self._live_public(j)
+        if live:
+            ticket["live"] = live
+        return "running", ticket
+
+    @staticmethod
+    def _live_public(j: dict) -> dict | None:
+        """FR-G1: the emitter's mirrored state, shaped for a poller. eta_s counts down
+        from the wait the router reported (gate lifts on its own; a poll never blocks)."""
+        live = j.get("live") or {}
+        if not live:
+            return None
+        out = {"phase": live.get("phase", "starting"),
+               "pct": live.get("pct", 0.0)}
+        for k in ("stage_line", "model", "key_id", "attempt"):
+            if live.get(k) is not None:
+                out[k] = live[k]
+        wu = live.get("wait_until")
+        if wu:
+            out["eta_s"] = round(max(0.0, wu - time.time()), 1)
+        return out
 
     def _prune(self) -> None:
         done = [k for k, j in self._jobs.items() if j["state"] != "running"]

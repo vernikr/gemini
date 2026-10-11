@@ -243,11 +243,13 @@ def build_server(deps: Deps) -> MCPServer:
         """Outcome of a background job (analyze_large/gemini_generate returned
         {status:'running', request_id}). Each call waits up to wait_seconds.
 
-        Returns: the final {result, meta} when done; {status:'running', elapsed_s}
-        while it still computes (call again); {status:'unknown', hint} if the daemon
-        restarted — re-run the ORIGINAL call with the SAME request_id (finished
-        chunks come from the router cache, so the retry is cheap). Quota/plan errors
-        surface exactly as in the sync path (structured JSON)."""
+        Returns: the final {result, meta} when done; {status:'running', elapsed_s, live}
+        while it still computes (call again) — 'live' says WHAT the job is doing right
+        now: phase (generating / waiting_rpm / waiting_tpm / chunking / consolidating / …),
+        eta_s while it waits out a quota gate, model, key_id and the latest stage line;
+        {status:'unknown', hint} if the daemon restarted — re-run the ORIGINAL call with
+        the SAME request_id (finished chunks come from the router cache, so the retry is
+        cheap). Quota/plan errors surface exactly as in the sync path (structured JSON)."""
         return await analyze_result_tool(deps, request_id, wait_seconds)
 
     @srv.tool()

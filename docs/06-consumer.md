@@ -197,10 +197,16 @@ Ask the agent (short-phrase template):
 
 Tools: `analyze_large` (chunked massive-body analysis), `gemini_generate` (single
 shot), `analyze_file` (upload ticket + routing: text documents are extracted and chunked,
-PDFs/images/audio are read by the provider),
-`analyze_result` (async ticket poll), `quota_status`, `router_logs`. Every compute
-answer starts with a one-line `report` (`backend=direct · route=… · model=… · req=N ·
-…s · clean run`) — the agent should relay it.
+PDFs/images/audio are read by the provider), `analyze_files` (several uploaded files,
+one answer), `analyze_result` (async ticket poll), `quota_status`, `router_logs`. Every
+compute answer starts with a one-line `report` (`backend=direct · route=… · model=… ·
+req=N · …s · clean run`) — the agent should relay it.
+
+While a job runs, each `{status:'running'}` ticket carries `live`: the current phase
+(`generating`, `waiting_rpm`/`waiting_tpm`, `chunking`, `consolidating`, …), `eta_s`
+while a quota gate is being waited out (counts down on every poll), the model, the key
+id and the latest stage line — enough to tell the user "still generating, about 40s of
+quota wait left" instead of "still running".
 
 File flow (for the agent — also returned by `quota_status` in the `file_flow` field):
 1) `file_upload_ticket(filename, size_bytes)` → 2) HTTP PUT the raw bytes to

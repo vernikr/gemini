@@ -188,6 +188,12 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   sidecars and spent markers age out at `ingest.keep_hours`, capped by
   `ingest.total_cap_mb` (oldest first), pruned when a ticket is issued, at the start of
   every `analyze_file` and on demand via `gemini-mcp prune`.
+- **FR-E10** A running-job ticket MUST say what the job is doing: `live` carries the
+  current `phase` (canonical from router events and gateway stages: `generating`,
+  `waiting_rpm`/`waiting_tpm`, `chunking`, `consolidating`, …), `eta_s` while a quota
+  gate is being waited out (counts down on every poll), `pct`, `model`, `key_id`,
+  `attempt` and the latest stage line. Polling surface only — no subscription, no extra
+  tool, and a poll never blocks longer than `wait_seconds`.
 
 ## F. Non-functional
 

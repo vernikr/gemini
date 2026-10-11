@@ -162,6 +162,15 @@ consolidation 10% (per round). Note: MCP v2 deprecates the logging capability
 (SEP-2577) — `ctx.info` is still emitted for v1-compatible clients; the progress
 message channel is primary, the embedded trace is the floor.
 
+**Live status of a running job** (FR-E10): async tools (`wait_seconds` set) run as a
+background job keyed by `request_id`; `_jobbed` hands the job's emitter a plain dict
+shared with JobManager. Every stage/router event mirrors its latest state into it —
+canonical phase (`generating`, `waiting_rpm`/`waiting_tpm`, `chunking`,
+`consolidating`, …), pct, latest stage line, model, key_id and, while a gate is being
+waited out, `wait_until`. Every running ticket returned by `analyze_result` carries it
+as `live`, with `eta_s` recomputed at read time: a poller sees the countdown without
+blocking and without subscribing to progress notifications.
+
 ## 5. Logging & eviction ("beautiful, terminal-accessible, self-cleaning")
 
 | Stream | Sink | Format | Eviction |

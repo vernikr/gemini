@@ -111,10 +111,11 @@ async def _jobbed(deps: Deps, tool: str, emitter: ProgressEmitter, params: dict,
     params = {**params, "request_id": key}
     deps.audit.record({"ts": time.time(), "tool": tool, "request_id": key,
                        "event": "async_submitted", "wait_seconds": wait_seconds})
+    live: dict = {}                                        # FR-G1: job → poller mirror
     status, payload = await deps.jobs.submit(
         key,
-        lambda: runner(ProgressEmitter(None, deps.logger), params),   # detached ctx
-        wait_seconds)
+        lambda: runner(ProgressEmitter(None, deps.logger, live=live), params),
+        wait_seconds, live=live)
     if status == "done":
         return payload
     if status == "error":
