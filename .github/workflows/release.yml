@@ -81,22 +81,29 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Consumer E2E from the public registries (retry while propagating)
+      - name: Consumer E2E from the public registries
         run: |
-          V="${GITHUB_REF_NAME#v}"; ok=0
-          for _ in $(seq 1 12); do
-            if uvx --refresh --from "gemini-mcp-gateway==$V" gemini-mcp --version; then ok=1; break; fi
-            sleep 30
-          done
-          test "$ok" = 1 || { echo "PyPI smoke failed for $V"; exit 1; }
-          ok=0
-          # npm propagation observed up to ~7 min (0.8.2: live 24s after the last of
-          # 8×30s retries) — 16×30s = 8 min window
-          for _ in $(seq 1 16); do
-            if npx -y "@vernikr/gemini-mcp@$V" --version; then ok=1; break; fi
-            sleep 30
-          done
-          test "$ok" = 1 || { echo "npm smoke failed for $V"; exit 1; }
+          V="${GITHUB_REF_NAME#v}"
+          # Registry metadata first, install second. The old loops retried the INSTALL,
+          # which paid a full re-resolve (and 30 s of sleep) for every attempt while the
+          # registries were still propagating: 12× for PyPI, 16× for npm. One cheap curl
+          # per try answers "is the version there yet", and the install runs once — after
+          # it can only succeed.
+          live() {          # $1 = index URL, $2 = jq test, $3 = registry name
+            for _ in $(seq 1 60); do
+              curl -fsS "$1" | jq -e --arg v "$V" "$2" >/dev/null 2>&1 && return 0
+              sleep 10
+            done
+            echo "::error::$3 did not serve $V within 10 minutes"; return 1
+          }
+          live "https://pypi.org/pypi/gemini-mcp-gateway/json" \
+               '.releases[$v] | length > 0' PyPI
+          # --refresh stays: the JSON API above and uv's cached simple index are
+          # different endpoints, and only the first was just polled
+          uvx --refresh --from "gemini-mcp-gateway==$V" gemini-mcp --version
+          live "https://registry.npmjs.org/@vernikr%2Fgemini-mcp" \
+               '.versions[$v] != null' npm
+          npx -y "@vernikr/gemini-mcp@$V" --version
 
   deploy:
     needs: pypi                             # deploy only what is already on PyPI
