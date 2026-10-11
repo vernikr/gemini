@@ -260,6 +260,12 @@ Env (`.env`): `GEMINI_API_KEYS` (comma) or `GEMINI_API_KEY_1..10`, `GEMINI_MCP_T
 - D8: Chunk service marker is a prompt-template file, editable without code (prompts inline in `prompts.py` as constants + optional `prompts/` dir override).
 - D9: Waiting covers minute-scale gates only (RPM/TPM/short cooldowns, capped at `wait.max_s`); waiting hours for a daily reset inside one tool call is impractical — the caller gets ETAs (progress + FR-B8 error) and decides: retry later or opt into overflow.
 - D10: File ingest = server-side helper (§10), self-hosted presigned pattern on the existing daemon (HMAC one-time URL) + scp channel — no object storage, no local shim on the client.
+- D12: Non-text files go to the provider (owner decision 2026-10-11, option A): local
+  extraction mangles exactly the pages that matter, and a page mixes text with images.
+  Everything the server CAN extract keeps the text pipeline — that is where chunking,
+  caching and cheap tokens live. Provider facts the design leans on: 2 GB per file,
+  20 GB per project, 48 h retention, no download back, and a file visible only to the
+  project of the key that uploaded it.
 - D11: Keep the client maximally light — all file processing (starting with RTF→text extraction) happens on the server; the client's job is one `curl`/`scp` and one tool call.
 
 ## 10. File ingest — "hand over a file, agent context stays clean" (D10)
@@ -288,11 +294,23 @@ Flow:
    - `scp <file> <scp_path>`: no tunnel needed, the SSH key is the auth; nothing claims
      the ticket, and the blob itself blocks a later PUT of it.
    Server writes `inbox/<id>.part` → atomic rename → `chmod 600`.
-3. MCP tool `analyze_file(task, upload_id, …same knobs as analyze_large…)`: server
-   loads the blob, decodes utf-8→latin-1, runs a binary sniff (NUL bytes /
-   non-text ratio) → non-text fails fast with `binary_file_needs_conversion`
-   (ZERO RPD spend), else the existing pipeline chunks/consolidates it.
-   `meta.file = {filename, bytes, chars, encoding}`.
+3. MCP tool `analyze_file(task, upload_id, …same knobs as analyze_large…)` routes the
+   blob by what it is (FR-B10):
+   - **text** the server can extract (pandoc set, RTF, plain) → the existing pipeline
+     chunks/consolidates it, with caching and progress unchanged;
+   - **PDF/image/audio/video** → the provider's Files API: the blob stays on disk and is
+     streamed to the provider by the router library, the token cost is measured
+     (`count_file_tokens`, free per FR-C7) and ONE request follows, pinned to the key that
+     owns the file (a file lives in its key's project). One file is never split.
+   - anything else fails fast with `binary_file_needs_conversion` (ZERO spend); a PDF over
+     the pre-flight ceilings fails with `pdf_too_large`/`pdf_too_many_pages`, also before
+     any upload. `pdfinfo` (poppler-utils) supplies the page count; it never reads content.
+   `meta.file = {filename, bytes, chars|mime, encoding, extractor, tokens?, provider?}`
+   where the provider block carries `{name, uri, expires_at, key_id}`.
+   The reference is cached in the upload sidecar and reused while unexpired and while its
+   key is still configured — the blob cannot change for a given `upload_id`, so re-analysis
+   costs one request, not one upload. Cache keys mix in the blob's content hash, never the
+   provider URI (a URI changes on every re-upload).
 4. Retention (FR-E9): blobs, sidecars and spent-ticket markers age out at `keep_hours`,
    the total is capped by `total_cap_mb` (oldest first); prune runs on ticket issuance,
    at the start of every `analyze_file` and on demand via `gemini-mcp prune`, so an

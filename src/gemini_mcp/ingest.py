@@ -2,7 +2,11 @@
 atomic inbox storage, text sniffing (binary fail-fast, ZERO quota spend), a minimal
 server-side RTF→text extractor (D11: the client stays maximally light) and retention
 pruning. Upload channels: HTTP PUT to a signed /v1/upload/<id> (signature IS the
-auth, bearer-exempt) or plain scp to inbox/<id> (SSH key is the auth)."""
+auth, bearer-exempt) or plain scp to inbox/<id> (SSH key is the auth).
+
+Input routing: text the server can extract (pandoc set, RTF, plain) keeps the text
+pipeline; PDF, images, audio and video go to the provider's Files API — `media_kind`
+decides, `sniff_binary` still rejects everything that is neither."""
 from __future__ import annotations
 
 import hashlib
@@ -161,6 +165,95 @@ def prune(inbox: Path, keep_hours: float, total_cap_mb: float) -> int:
         _evict(inbox, p.name)
         removed += 1
     return removed
+
+
+# ---------- provider-bound media (Files API) ----------
+
+# What the provider reads natively. Magic first, extension only as a hint for files
+# whose container we cannot fingerprint — and only when the bytes are not text, so a
+# plain-text file named .mp4 keeps going down the text path.
+_MEDIA_MAGIC = (
+    (b"%PDF", "pdf", "application/pdf"),
+    (b"\x89PNG\r\n\x1a\n", "image", "image/png"),
+    (b"\xff\xd8\xff", "image", "image/jpeg"),
+    (b"GIF87a", "image", "image/gif"),
+    (b"GIF89a", "image", "image/gif"),
+    (b"OggS", "audio", "audio/ogg"),
+    (b"fLaC", "audio", "audio/flac"),
+    (b"ID3", "audio", "audio/mpeg"),
+)
+_MEDIA_EXTS = {
+    "pdf": "application/pdf", "png": "image/png", "jpg": "image/jpeg",
+    "jpeg": "image/jpeg", "webp": "image/webp", "gif": "image/gif",
+    "heic": "image/heic", "heif": "image/heif", "tif": "image/tiff",
+    "tiff": "image/tiff", "bmp": "image/bmp",
+    "wav": "audio/wav", "mp3": "audio/mpeg", "m4a": "audio/mp4", "aac": "audio/aac",
+    "ogg": "audio/ogg", "oga": "audio/ogg", "opus": "audio/opus", "flac": "audio/flac",
+    "mp4": "video/mp4", "m4v": "video/mp4", "mov": "video/quicktime",
+    "webm": "video/webm", "avi": "video/x-msvideo", "mkv": "video/x-matroska",
+}
+
+
+def media_kind(data: bytes, filename: str = "") -> tuple[str, str] | None:
+    """(kind, mime) when the provider should read the file itself, else None."""
+    for magic, kind, mime in _MEDIA_MAGIC:
+        if data.startswith(magic):
+            return kind, mime
+    if data[4:8] == b"ftyp":                       # ISO-BMFF: mp4/mov/m4a share the box
+        brand = data[8:12].decode("latin-1", "replace")
+        return ("audio", "audio/mp4") if brand.startswith(("M4A", "mp4a", "M4B")) \
+            else ("video", "video/mp4")
+    if data.startswith(b"RIFF"):
+        if data[8:12] == b"WAVE":
+            return "audio", "audio/wav"
+        if data[8:12] == b"WEBP":
+            return "image", "image/webp"
+    if data[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return "audio", "audio/mpeg"               # MP3 frame sync, no ID3 tag
+    low = filename.lower()
+    mime = _MEDIA_EXTS.get(low.rsplit(".", 1)[-1]) if "." in low else None
+    if mime and sniff_binary(data, filename, pandoc_ok=False) is not None:
+        return mime.split("/")[0], mime            # binary + a media name: trust the name
+    return None
+
+
+def pdf_pages(path: Path, timeout_s: int = 30) -> int | None:
+    """Page count via pdfinfo (poppler). None when the tool is missing or the PDF is
+    unreadable — the provider stays the authority; this check only refuses early."""
+    import shutil
+    import subprocess
+
+    exe = shutil.which("pdfinfo")
+    if not exe:
+        return None
+    try:
+        out = subprocess.run([exe, str(path)], capture_output=True, timeout=timeout_s,
+                             check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    m = re.search(rb"^Pages:\s+(\d+)", out.stdout, re.M)
+    return int(m.group(1)) if m else None
+
+
+def expires_ts(value: str | None) -> float | None:
+    """Provider `expirationTime` (RFC 3339) as a unix timestamp, None when unparsable."""
+    from datetime import datetime
+
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def save_provider_ref(inbox: Path, upload_id: str, ref: dict) -> None:
+    """Remember which provider file carries this blob, so a second analyze_file on the
+    same id re-uploads only once the reference expired (and the blob is immutable for a
+    given upload_id, so the reference cannot go stale while it exists)."""
+    side = load_sidecar(inbox, upload_id)
+    side["provider"] = {**ref, "saved": time.time()}
+    sidecar_path(inbox, upload_id).write_text(json.dumps(side), encoding="utf-8")
 
 
 # ---------- text sniffing & decoding ----------

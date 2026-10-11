@@ -64,9 +64,11 @@ auto-discovers `~/.config/gemini-mcp/`.
 
 Analyzing a FILE (agent): never read it yourself and never inline its contents into a
 prompt. Call `file_upload_ticket(filename, size_bytes)` → HTTP PUT the raw bytes to
-`upload_url` → `analyze_file(upload_id, task)`. Extraction, chunking and quota are
-server-side; `quota_status` returns this recipe in its `file_flow` field, and raw
-RTF/PDF/DOCX payloads in text tools fail fast with a `raw_document_inlined` fix.
+`upload_url` → `analyze_file(upload_id, task)`. Text documents are extracted and chunked
+server-side; PDFs, images and audio are sent to the provider once and answered in one
+measured request (never split). Quota is accounted either way; `quota_status` returns this
+recipe in its `file_flow` field, and raw RTF/PDF/DOCX payloads in text tools fail fast
+with a `raw_document_inlined` fix.
 
 Direct mode needs nothing but API keys. Usage is tracked in a LOCAL persistent ledger
 (`~/.config/gemini-mcp/state.db`): quota counters survive restarts and are shared by all
@@ -109,8 +111,9 @@ GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor|smoke
 ```
 
 Tools: `analyze_large` (chunking pipeline), `gemini_generate` (single shot),
-`file_upload_ticket` + `analyze_file` (file flow: upload → server-side pandoc
-extraction → analysis), `analyze_result` (async poll), `quota_status`, `router_logs`.
+`file_upload_ticket` + `analyze_file` (file flow: upload → text extraction or the
+provider's Files API for PDFs/images/audio → analysis), `analyze_result` (async poll),
+`quota_status`, `router_logs`.
 Raw document bytes (RTF/PDF/DOCX markers) pasted into `gemini_generate`/`analyze_large`
 are rejected with `raw_document_inlined` + the exact fix — always use the file flow.
 

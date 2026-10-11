@@ -218,16 +218,20 @@ async def test_analyze_file_prunes_a_stale_inbox(tmp_path, monkeypatch):
 
 
 async def test_binary_fail_fast_zero_spend(tmp_path, monkeypatch):
+    """An unsupported container still fails fast with ZERO spend. PDFs used to be the
+    example here; they are supported now (provider Files API — see test_files_api.py),
+    so this pins the rule on what stays unsupported."""
     router = FakeRouter()
     deps = _deps(tmp_path, monkeypatch, router=router)
-    ticket = await file_upload_ticket_tool(deps, "doc.pdf", 8)
+    ticket = await file_upload_ticket_tool(deps, "archive.gz", 8)
     ingest.save_upload(Path(deps.app_cfg.ingest.dir), ticket["upload_id"],
-                       b"%PDF-1.7", 50 * 2**20)
+                       b"\x1f\x8b\x08\x00binary", 50 * 2**20)
     with pytest.raises(ToolError) as ei:
         await analyze_file_tool(deps, ProgressEmitter(FakeCtx()),
                                 {"task": "t", "upload_id": ticket["upload_id"]})
     assert "binary_file_needs_conversion" in str(ei.value)
-    assert not router.calls                                # ZERO quota spend
+    assert "PDF, images, audio" in str(ei.value)     # the hint names what IS readable
+    assert not router.calls and not router.uploads   # ZERO quota spend, no upload
 
 
 async def test_analyze_file_rtf_end_to_end(tmp_path, monkeypatch):

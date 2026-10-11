@@ -68,6 +68,13 @@ class IngestCfg(BaseModel):
     scp_target: str = ""           # e.g. root@<vps>; shown in tickets when set
     use_pandoc: bool = True        # RTF/DOCX/ODT/EPUB/HTML → gfm Markdown
     pandoc_timeout_s: int = 60
+    # Non-text input (PDF, images, audio, video) goes to the provider's Files API:
+    # local extraction mangles exactly the pages that matter, and pages mix text with
+    # images anyway. Numbers below mirror the provider's document ceilings; they are
+    # confirmed by probe, and a file over them is refused before any upload.
+    files_api: bool = True
+    pdf_max_mb: int = 50
+    pdf_max_pages: int = 1000
 
 
 class AppCfg(BaseModel):

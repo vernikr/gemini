@@ -27,6 +27,15 @@ if ! command -v pandoc >/dev/null 2>&1; then
   DEBIAN_FRONTEND=noninteractive apt-get install -y -qq pandoc >/dev/null
 fi
 
+# poppler-utils — pdfinfo only: the page count a PDF pre-flight refuses on. The content
+# of a PDF is never extracted locally (the provider reads it), so this stays a one-shot
+# subprocess, like pandoc. Licence-clean: no Python dependency, no AGPL.
+if ! command -v pdfinfo >/dev/null 2>&1; then
+  echo "→ installing poppler-utils (pdfinfo: PDF page-count pre-flight)"
+  apt-get update -qq >/dev/null 2>&1 || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y -qq poppler-utils >/dev/null
+fi
+
 mkdir -p "$APP/logs" "$SHARED" "$ROUTER_SRC"
 chown -R "$APP_USER:$APP_USER" "$APP" "$SHARED" "$ROUTER_SRC"
 chmod 770 "$SHARED"

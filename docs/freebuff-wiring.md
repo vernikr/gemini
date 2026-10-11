@@ -98,7 +98,7 @@ so the retry is nearly free. Audit gains `event:"async_submitted"` rows; job lif
 | `gemini_generate` | direct single call (model pinning, thinking_level, json out) |
 | `analyze_result` | fetch/await a background job that returned `status:"running"` |
 | `file_upload_ticket` | reserve an upload: one-time signed URL + scp path |
-| `analyze_file` | analyze an uploaded file (server extracts text; RTF supported) |
+| `analyze_file` | analyze an uploaded file: text is extracted/chunked, PDFs/images/audio go to the provider Files API |
 | `quota_status` | "which model can take a request right now?" |
 | `router_logs` | recent calls/failures from the server ledger |
 
@@ -115,13 +115,16 @@ scp paper.rtf root@<vps>:/opt/apps/gemini-mcp/inbox/<upload_id>   # no tunnel ne
 # 3) agent: analyze_file(task="…", upload_id="…")
 ```
 
-Server-side: pandoc (installed by setup) converts **RTF/DOCX/ODT/EPUB/HTML →
-GitHub-flavored Markdown** — headings, bold/italic, lists and tables survive for
-the model (`meta.file.extractor = pandoc/rtf→gfm`, `encoding = markdown`); if
-pandoc is ever missing, RTF falls back to the built-in plain-text extractor
-(cp1251 `\'xx` runs, `\uNNNN`, junk groups skipped). Binaries (pdf/zip) fail fast
-with `binary_file_needs_conversion` and ZERO quota spent (PDF converter deferred —
-candidate: pymupdf4llm). Inbox retention: `keep_hours` (default 24) +
+Server-side, two paths. **Text documents** (pandoc: RTF/DOCX/ODT/EPUB/HTML → GitHub-flavored
+Markdown; plain and csv as-is) are chunked like any other body (`meta.file.extractor =
+pandoc/rtf→gfm`, `encoding = markdown`); if pandoc is ever missing, RTF falls back to the
+built-in extractor (cp1251 `\'xx` runs, `\uNNNN`, junk groups skipped). **PDFs, images,
+audio and video** are uploaded to the provider's Files API and read there: one file is one
+request, never split, `meta.file.tokens` carries the measured cost, and
+`meta.file.provider` the provider name/uri/expiry. Re-analyzing the same `upload_id` reuses
+the uploaded file until it expires. Anything else (zip/gzip/unknown) fails fast with
+`binary_file_needs_conversion` and ZERO quota spent; a PDF over `pdf_max_mb`/`pdf_max_pages`
+is refused before any upload. Inbox retention: `keep_hours` (default 24) +
 `total_cap_mb` (default 500); pruned on each ticket issuance, at the start of every
 `analyze_file` and by `gemini-mcp prune`. An upload ticket is spent by its first PUT
 (the blob survives a replay, the spent marker is what refuses it), so a failed upload

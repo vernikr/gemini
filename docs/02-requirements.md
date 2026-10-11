@@ -55,6 +55,15 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 - **FR-B9** MUST run over two transports from one codebase: stdio and streamable HTTP
   (daemon, bearer-token auth, `127.0.0.1` bind by default).
 
+- **FR-B10** `analyze_file` MUST accept PDFs, images, audio and video by sending the bytes
+  to the provider's Files API (option A, owner decision 2026-10-11): one upload, one
+  request pinned to the key that owns the file, one measured token count before the
+  request so the TPM gate is honest. A single file is never split. Text the server can
+  extract (pandoc set, RTF, plain) keeps the chunked pipeline. Pre-flight refusals —
+  unsupported type, provider document ceilings — spend nothing and say which limit was
+  hit. The provider reference is cached in the upload sidecar and reused until it expires
+  or its key leaves the configuration.
+
 ## C. Routing & quota (gemini-router)
 
 - **FR-C1** MUST route through the configured Flash chain (newest first; deprecated

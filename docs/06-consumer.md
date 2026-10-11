@@ -173,7 +173,8 @@ Ask the agent (short-phrase template):
 > через gemini разбери файл <путь>, задача: <словами>
 
 Tools: `analyze_large` (chunked massive-body analysis), `gemini_generate` (single
-shot), `analyze_file` (upload ticket + server-side RTF/DOCX extraction),
+shot), `analyze_file` (upload ticket + routing: text documents are extracted and chunked,
+PDFs/images/audio are read by the provider),
 `analyze_result` (async ticket poll), `quota_status`, `router_logs`. Every compute
 answer starts with a one-line `report` (`backend=direct · route=… · model=… · req=N ·
 …s · clean run`) — the agent should relay it.
@@ -181,15 +182,25 @@ answer starts with a one-line `report` (`backend=direct · route=… · model=�
 File flow (for the agent — also returned by `quota_status` in the `file_flow` field):
 1) `file_upload_ticket(filename, size_bytes)` → 2) HTTP PUT the raw bytes to
 `upload_url` → 3) `analyze_file(upload_id, task)`. The server extracts clean text
-(pandoc), chunks if needed and spends quota atomically. Pasting raw file contents into
+(pandoc) and chunks it, or — for PDFs, images and audio — sends the file to the provider
+once and asks one measured question about it; spending is accounted either way.
+Pasting raw file contents into
 `gemini_generate`/`analyze_large` is rejected (`raw_document_inlined`): markup like RTF
 is unreadable for the model (non-ASCII text survives as hex escapes).
 
-Per-upload cap: `ingest.max_file_mb`. It is a memory guard sized against the service's
-`MemoryMax`, not a provider limit — the pipeline holds the extracted text in RAM while
-chunking, at roughly 4.6 MB of RSS per uploaded megabyte, so a 350 MB ceiling is
-reached near 60 MB of Cyrillic text and sooner for Latin scripts, which pack more
-characters per byte. Set it no higher than you can afford to lose the service over.
+PDFs are never split into parts: one file is one request, and `meta.file.tokens` carries
+the measured cost. `ingest.pdf_max_mb` / `pdf_max_pages` mirror the provider's document
+ceilings — a file over them is refused before any upload, with the number that tripped.
+A second `analyze_file` on the same `upload_id` reuses the uploaded file (the reference
+lives in the inbox sidecar) until the provider expires it or the key changes.
+
+Per-upload cap: `ingest.max_file_mb`. For a text document it is a memory guard sized
+against the service's `MemoryMax` — the pipeline holds the extracted text in RAM while
+chunking, at roughly 4.6 MB of RSS per uploaded megabyte, so a 350 MB ceiling is reached
+near 60 MB of Cyrillic text and sooner for Latin scripts. For a PDF, image or audio file
+the blob is streamed to the provider and never held in RAM, so the cap there is about
+transfer and disk, not memory — raising it for such a file (with the owner's word) risks
+much less than for a document.
 
 An agent can exceed the cap per call with `override_size_limit`, which the tool
 instructions tell it to use only after the user has agreed in chat, having been told

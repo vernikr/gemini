@@ -94,6 +94,9 @@ _TOOL_ERROR_STATUS = {"quota_exhausted": 429, "plan_budget_insufficient": 429,
                       "raw_document_inlined": 400, "bad_size": 400, "bad_ticket": 400,
                       "file_too_large": 413, "size_mismatch": 413,
                       "upload_not_found": 404,
+                      "pdf_too_large": 413, "media_too_large": 413,
+                      "pdf_too_many_pages": 413, "files_api_disabled": 415,
+                      "file_upload_failed": 502,
                       "binary_file_needs_conversion": 415, "conversion_unavailable": 415,
                       "ticket_expired": 410, "already_uploaded": 409,
                       "ticket_consumed": 409,
@@ -288,13 +291,21 @@ def build_server(deps: Deps) -> MCPServer:
         """Analyze an uploaded file server-side (step 2 of 2; D11: zero client-side
         processing). ALWAYS relay the response's 'report' field to the user in chat.
 
-        The server loads inbox/<upload_id>, sniffs it (binary → fail-fast
-        'binary_file_needs_conversion', ZERO quota spent), extracts text (RTF
-        supported server-side; txt/md/csv as-is), then runs the full analyze_large
-        pipeline on it. Same knobs, routes and async ticket flow as analyze_large.
+        The server loads inbox/<upload_id> and routes by what the bytes are:
+        - text documents (.txt .md .csv, RTF, and pandoc's set: docx/odt/epub/html) are
+          extracted server-side and run the chunked analyze_large pipeline;
+        - PDFs, images, audio and video go to the provider's Files API: one upload, one
+          measured request (meta.file.tokens carries the measurement; the file is never
+          split). A second analyze_file on the same upload_id reuses the uploaded file
+          until the provider expires it.
+        - anything else fails fast with 'binary_file_needs_conversion', ZERO quota spent.
+        A PDF over the pre-flight ceilings is refused the same way (pdf_too_large,
+        pdf_too_many_pages). Same knobs and routes as analyze_large; the job runs as a
+        ticket when wait_seconds elapses.
 
-        Returns: {report, result, meta{…, file{filename, bytes, chars, encoding,
-        extractor}}} or {status:'running', request_id} while the job computes."""
+        Returns: {report, result, meta{…, file{filename, bytes, mime|chars, encoding,
+        extractor, tokens?, provider{name, uri, expires_at}}}} or {status:'running',
+        request_id} while the job computes."""
         emitter = ProgressEmitter(ctx, deps.logger)
         return await _jobbed(deps, "analyze_file", emitter, {
             "task": task, "upload_id": upload_id, "thinking_level": thinking_level,

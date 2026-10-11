@@ -18,7 +18,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from gemini_router import QuotaExhaustedError, Router, RouterRequest, iso, pt_midnight_ts
+from gemini_router import (
+    QuotaExhaustedError,
+    Router,
+    RouterError,
+    RouterRequest,
+    UploadedFile,
+    iso,
+    key_id,
+    pt_midnight_ts,
+)
 from mcp.server.mcpserver.exceptions import ToolError
 
 from . import ingest
@@ -114,8 +123,21 @@ async def analyze_result_tool(deps: Deps, request_id: str,
     return payload                     # running-ticket or unknown-hint, both dicts
 
 
+class _UploadFailed(Exception):
+    """Structured payload for a provider upload that never produced a file."""
+
+    def to_dict(self) -> dict:
+        return {"error": "file_upload_failed",
+                "hint": "the provider did not accept the file; NOTHING was analyzed and "
+                        "no model quota was spent. Check the file, then retry — a fresh "
+                        "attempt is allowed while the inbox blob is still there."}
+
+
+_UPLOAD_FAILED = _UploadFailed()
+
+
 def _fail(deps: Deps, emitter: ProgressEmitter, tool: str, request_id: str | None,
-          e: QuotaExhaustedError | PlanBudgetError) -> ToolError:
+          e: QuotaExhaustedError | PlanBudgetError | _UploadFailed) -> ToolError:
     payload = e.to_dict()
     payload["progress_trace"] = emitter.trace
     deps.audit.record({"ts": time.time(), "tool": tool, "request_id": request_id,
@@ -130,8 +152,9 @@ _DOC_MARKERS = (("{\\rtf1", "RTF"), ("%PDF-", "PDF"), ("PK\x03\x04", "DOCX/XLSX 
 # payloads — quota_status, which agents reliably call first, and the raw-document
 # rejection — but both are this string, so the steps cannot drift apart.
 FILE_FLOW = ("file_upload_ticket(filename, size_bytes) \u2192 HTTP PUT the bytes to the "
-             "returned upload_url \u2192 analyze_file(upload_id, task). Extraction "
-             "(pandoc), chunking and quota accounting happen server-side. Never inline "
+             "returned upload_url \u2192 analyze_file(upload_id, task). Text documents "
+             "are extracted server-side (pandoc/RTF) and chunked; PDFs, images and "
+             "audio go to the provider's Files API. Never inline "
              "raw file contents into a text tool: the markup is unreadable for the model "
              "(non-ASCII survives as hex escapes) and burns your context.")
 # Container signatures only ever sit at offset 0; scanning the whole field would reject
@@ -263,7 +286,20 @@ async def file_upload_ticket_tool(deps: Deps, filename: str, size_bytes: int,
     return out
 
 
-def _load_and_extract(inbox: Path, upload_id: str, cfgi) -> tuple[dict, int, str, str, str]:
+@dataclass(slots=True)
+class _Loaded:
+    """One inbox blob, resolved. `text is None` means the bytes are provider-bound: the
+    blob stays on disk and is streamed to the Files API instead of being decoded."""
+
+    side: dict
+    nbytes: int
+    text: str | None
+    enc: str                 # encoding for text, MIME for provider-bound media
+    extractor: str           # 'provider/<kind>' | 'pandoc/<fmt>→gfm' | 'rtf' | 'plain'
+    path: Path
+
+
+def _load_and_extract(inbox: Path, upload_id: str, cfgi) -> _Loaded:
     """Blocking half of analyze_file, run in a worker thread: pandoc is a subprocess and
     the RTF fallback is pure-Python parsing, either of which would freeze the whole
     daemon (healthz, keep-alives, every other client) for the duration.
@@ -275,23 +311,56 @@ def _load_and_extract(inbox: Path, upload_id: str, cfgi) -> tuple[dict, int, str
         raise ingest.IngestError("upload_not_found", upload_id=upload_id,
                                  hint="ticket reserved but bytes never arrived — "
                                       "run the curl/scp upload from the ticket")
+    filename = side.get("filename", "")
+    with path.open("rb") as fh:                 # the head decides; provider-bound blobs
+        head = fh.read(65536)                   # are never read into memory at all
+    media = ingest.media_kind(head, filename) if cfgi.files_api else None
+    nbytes = path.stat().st_size
+    if media:
+        kind, mime = media
+        if kind == "pdf":
+            over = nbytes > cfgi.pdf_max_mb * 1_048_576
+            if over:
+                raise ingest.IngestError(
+                    "pdf_too_large", bytes=nbytes,
+                    max_bytes=cfgi.pdf_max_mb * 1_048_576,
+                    hint="the provider refuses PDFs over this even though its staging "
+                         "accepts far more (zero quota spent); split or compress it")
+            pages = ingest.pdf_pages(path, cfgi.pandoc_timeout_s)
+            if pages is not None and pages > cfgi.pdf_max_pages:
+                raise ingest.IngestError(
+                    "pdf_too_many_pages", pages=pages, max_pages=cfgi.pdf_max_pages,
+                    hint="a single PDF is never split here; the provider refuses "
+                         "documents over this page count (zero quota spent)")
+        return _Loaded(side=side, nbytes=nbytes, text=None, enc=mime,
+                       extractor=f"provider/{kind}", path=path)
+    if not cfgi.files_api and ingest.media_kind(head, filename):
+        kind, mime = ingest.media_kind(head, filename)
+        raise ingest.IngestError(
+            "files_api_disabled", kind=kind, mime=mime, filename=filename,
+            hint="ingest.files_api is off, so this file cannot be read: only text "
+                 "documents are supported. Enable it to send PDFs, images and audio "
+                 "to the provider (zero quota spent)")
     data = path.read_bytes()
-    reason = ingest.sniff_binary(data, side.get("filename", ""), cfgi.use_pandoc)
+    reason = ingest.sniff_binary(data, filename, cfgi.use_pandoc)
     if reason:
         raise ingest.IngestError(
             "binary_file_needs_conversion", reason=reason,
             filename=side.get("filename"), bytes=len(data),
-            hint="server-side converters (docx/pdf/zip) are deferred; NOTHING was "
-                 "sent to any model (zero quota spent). Upload .txt/.md/.csv/.rtf "
-                 "(RTF is extracted server-side) or convert first.")
+            hint="NOTHING was sent to any model (zero quota spent). PDF, images, audio "
+                 "and video are read by the provider; text and office documents "
+                 "(.txt .md .csv .rtf .docx .odt .epub .html) are extracted server-side. "
+                 "Convert anything else first.")
     text, enc, extractor = ingest.extract_text(
-        data, side.get("filename", ""), cfgi.use_pandoc, cfgi.pandoc_timeout_s)
-    return side, len(data), text, enc, extractor
+        data, filename, cfgi.use_pandoc, cfgi.pandoc_timeout_s)
+    return _Loaded(side=side, nbytes=len(data), text=text, enc=enc,
+                   extractor=extractor, path=path)
 
 
 async def analyze_file_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
-    """Server-side file analysis (D11): load inbox blob → sniff (binary → fail-fast,
-    ZERO spend) → extract text (RTF server-side) → full analyze_large pipeline."""
+    """Server-side file analysis (D11): load inbox blob → sniff (unsupported → fail-fast,
+    ZERO spend) → text documents run the existing chunked pipeline, PDFs/images/audio go
+    to the provider's Files API as one measured request."""
     cfgi = deps.app_cfg.ingest
     inbox = Path(cfgi.dir)
     upload_id = params["upload_id"]
@@ -301,26 +370,129 @@ async def analyze_file_tool(deps: Deps, emitter: ProgressEmitter, params: dict) 
     # oldest entry the cap evicts.
     await asyncio.to_thread(ingest.prune, inbox, cfgi.keep_hours, cfgi.total_cap_mb)
     try:
-        side, nbytes, text, enc, extractor = await asyncio.to_thread(
-            _load_and_extract, inbox, upload_id, cfgi)
+        loaded = await asyncio.to_thread(_load_and_extract, inbox, upload_id, cfgi)
     except ingest.IngestError as e:
         deps.audit.record({"ts": time.time(), "tool": "analyze_file",
                            "upload_id": upload_id, "error": e.payload["error"]})
         raise ToolError(json.dumps(e.payload, ensure_ascii=False)) from e
-    await emitter.stage("file_loaded", 1,
-                        f"{side.get('filename')}: {nbytes} bytes → {len(text)} "
-                        f"chars ({extractor}/{enc})")
-    sub = {k: v for k, v in params.items() if k != "upload_id"}
-    sub["body"] = text
-    out = await analyze_large_tool(deps, emitter, sub)
-    out["meta"]["file"] = {"filename": side.get("filename"), "bytes": nbytes,
-                           "chars": len(text), "encoding": enc, "extractor": extractor}
-    out["report"] = (f"file={side.get('filename')} ({len(text)} chars via "
-                     f"{extractor}) · {out['report']}")
-    deps.audit.record({"ts": time.time(), "tool": "analyze_file",
-                       "upload_id": upload_id, "filename": side.get("filename"),
-                       "bytes": nbytes, "chars": len(text), "extractor": extractor})
+    filename = loaded.side.get("filename")
+    if loaded.text is None:
+        out = await _provider_file_analysis(deps, emitter, params, inbox, upload_id,
+                                           loaded)
+    else:
+        await emitter.stage("file_loaded", 1,
+                            f"{filename}: {loaded.nbytes} bytes → {len(loaded.text)} "
+                            f"chars ({loaded.extractor}/{loaded.enc})")
+        sub = {k: v for k, v in params.items() if k != "upload_id"}
+        sub["body"] = loaded.text
+        out = await analyze_large_tool(deps, emitter, sub)
+        out["meta"]["file"] = {
+            "filename": filename, "bytes": loaded.nbytes, "chars": len(loaded.text),
+            "encoding": loaded.enc, "extractor": loaded.extractor, "via": "text"}
+        out["report"] = (f"file={filename} ({len(loaded.text)} chars via "
+                         f"{loaded.extractor}) · {out['report']}")
+        deps.audit.record({"ts": time.time(), "tool": "analyze_file",
+                           "upload_id": upload_id, "filename": filename,
+                           "bytes": loaded.nbytes, "chars": len(loaded.text),
+                           "extractor": loaded.extractor})
     return out
+
+
+# A cached provider reference is reused while it has this long left: the provider drops
+# files after 48 h, and a request sent into that edge would fail with a confusing 4xx.
+_REF_MARGIN_S = 600
+
+
+def _cached_upload(router: Router, loaded: _Loaded) -> UploadedFile | None:
+    """The provider file this blob is already on, when it is still usable: unexpired and
+    owned by a key the router still holds. The blob never changes for a given upload_id,
+    so the reference cannot go stale while it exists."""
+    ref = (loaded.side.get("provider") or {})
+    if not ref.get("uri") or not ref.get("key_id"):
+        return None
+    exp = ingest.expires_ts(ref.get("expires_at"))
+    if exp is not None and exp - time.time() <= _REF_MARGIN_S:
+        return None
+    if ref["key_id"] not in {key_id(k) for k in router.cfg.api_keys}:
+        return None                        # the key was rotated out: it cannot see its file
+    return UploadedFile(name=ref.get("name", ""), uri=ref["uri"],
+                        mime=ref.get("mime") or loaded.enc, size=loaded.nbytes,
+                        state="ACTIVE", expires_at=ref.get("expires_at"),
+                        sha256=ref.get("sha256"), key_id=ref["key_id"])
+
+
+async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: dict,
+                                  inbox: Path, upload_id: str, loaded: _Loaded) -> dict:
+    """PDF / image / audio / video: upload once, measure the tokens, then one request
+    pinned to the key that owns the file. One file is one request — never split."""
+    filename = loaded.side.get("filename")
+    router, ovf, route = _apply_route(deps, params.get("route"), params.get("overflow"))
+    model = params.get("model") or router.cfg.chain[0]
+    up = _cached_upload(router, loaded)
+    if up is None:
+        await emitter.stage("uploading", 4,
+                            f"{filename}: {loaded.nbytes} bytes → provider Files API "
+                            f"({loaded.enc})")
+        try:
+            up = await router.upload_file(loaded.path, mime=loaded.enc, model=model,
+                                          source="mcp", display_name=filename)
+        except QuotaExhaustedError as e:
+            raise _fail(deps, emitter, "analyze_file", params.get("request_id"), e) from e
+        except RouterError as e:
+            raise _fail(deps, emitter, "analyze_file", params.get("request_id"),
+                        _UPLOAD_FAILED) from e
+        await asyncio.to_thread(ingest.save_provider_ref, inbox, upload_id, {
+            "name": up.name, "uri": up.uri, "mime": up.mime,
+            "expires_at": up.expires_at, "key_id": up.key_id, "sha256": up.sha256})
+    try:
+        file_tokens = await router.count_file_tokens(model, up.uri, up.mime,
+                                                     key_id=up.key_id)
+    except (RouterError, QuotaExhaustedError) as e:      # a measurement, never fatal
+        deps.logger.warning("count_file_tokens failed (%s) — sending unmeasured", e)
+        file_tokens = 0
+    await emitter.stage("uploaded", 8,
+                        f"provider file {up.name} ready"
+                        + (f" · {file_tokens} tokens" if file_tokens else
+                           " · token count unavailable"))
+    task = params["task"]
+    # The TPM gate must include the file: the router refuses a request that carries
+    # files without a measured estimate, and this is that measurement.
+    est = file_tokens + max(1, len(task) // 4)
+    req = RouterRequest(prompt=task, system=params.get("system"),
+                        thinking_level=params.get("thinking_level")
+                        or deps.app_cfg.thinking.default,
+                        output_format=params.get("output_format", "text"),
+                        max_output_tokens=params.get("max_output_tokens"),
+                        model=params.get("model"), overflow=ovf,
+                        wait=params.get("wait_for_minute_limits"),
+                        request_id=params.get("request_id"), source="mcp",
+                        kind="single", est_tokens=est)
+    try:
+        res = await router.complete(req, on_event=emitter.router_event_sync, files=[up])
+    except QuotaExhaustedError as e:
+        raise _fail(deps, emitter, "analyze_file", req.request_id, e) from e
+    await emitter.stage("done", 100, f"done on {res.model} in {res.latency_s:.1f}s")
+    await emitter.drain()
+    meta = {"request_id": res.request_id, "model": res.model, "key_id": res.key_id,
+            "tokens_in": res.tokens_in, "tokens_out": res.tokens_out,
+            "latency_s": res.latency_s, "cached": res.cached,
+            "overflow_tier": res.overflow_tier, "quota_after": res.quota_after,
+            "route": route, "overflow": ovf, "backend": deps.backend,
+            "thinking_level": req.thinking_level, "requests_spent": 0 if res.cached else 1,
+            "progress_trace": emitter.trace,
+            "file": {"filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
+                     "tokens": file_tokens, "extractor": loaded.extractor, "via": "files_api",
+                     "provider": {"name": up.name, "uri": up.uri,
+                                  "expires_at": up.expires_at, "key_id": up.key_id}}}
+    deps.audit.record({"ts": time.time(), "tool": "analyze_file", "upload_id": upload_id,
+                       "filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
+                       "file_tokens": file_tokens, "via": "files_api",
+                       "provider_file": up.name, "request_id": res.request_id,
+                       "model": res.model, "cached": res.cached})
+    report = (f"file={filename} ({loaded.nbytes} bytes"
+              + (f", {file_tokens} tokens" if file_tokens else "")
+              + f") via Files API · {_report(meta)}")
+    return {"report": report, "result": res.text, "meta": meta}
 
 
 async def quota_status_tool(deps: Deps) -> dict:

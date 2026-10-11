@@ -5,7 +5,14 @@ import logging
 import re
 from types import SimpleNamespace
 
-from gemini_router import QuotaExhaustedError, RouterError, RouterEvent, RouterResult
+from gemini_router import (
+    QuotaExhaustedError,
+    RouterError,
+    RouterEvent,
+    RouterResult,
+    UploadedFile,
+    key_id,
+)
 from gemini_router.config import Config as RouterConfig
 
 from gemini_mcp.config import AppCfg
@@ -13,10 +20,22 @@ from gemini_mcp.tools import Deps
 
 
 class FakeRouter:
-    """countTokens = len//4; response text depends on request kind."""
+    """countTokens = len//4; response text depends on request kind. The Files API half
+    (`upload_file`, `count_file_tokens`, `files=` on complete) mirrors the real one's
+    contract: the returned record carries the key_id the request gets pinned to."""
 
-    def __init__(self, *, budgets=None, fail_chunks=(), raise_quota=False, cfg=None):
+    KEY = "fake-key"
+    EXPIRY = "2099-01-01T00:00:00Z"          # never stale in tests that do not say so
+
+    def __init__(self, *, budgets=None, fail_chunks=(), raise_quota=False, cfg=None,
+                 file_tokens=1234, upload_error=None, expiry=None):
         self.calls: list = []
+        self.uploads: list[dict] = []
+        self.file_counts: list[tuple] = []
+        self.files_seen: list[list] = []
+        self.file_tokens = file_tokens
+        self.upload_error = upload_error
+        self.expiry = expiry or self.EXPIRY
         self.count_calls: list[str] = []
         self.fail_chunks = set(fail_chunks)
         self.empty_chunks: set[int] = set()   # starvation sim: ok result, empty text
@@ -27,18 +46,42 @@ class FakeRouter:
         self.cfg = cfg or SimpleNamespace(
             overflow_tiers=["gemini-3.5-flash-lite", "gemma-auto"],
             overflow_limits=SimpleNamespace(rpd=500),
-            quota_day_tz="America/Los_Angeles")
+            quota_day_tz="America/Los_Angeles",
+            chain=["gemini-3.8-flash", "gemini-3-flash-preview"],
+            api_keys=[self.KEY])
         self.ledger = SimpleNamespace(calls_tail=lambda *a, **k: [])
 
     async def count_tokens(self, prompt: str, model=None) -> int:
         self.count_calls.append(prompt)
         return max(1, len(prompt) // 4)
 
-    async def complete(self, req, on_event=None) -> RouterResult:
+    # ------------------------------------------------------------ Files API
+    async def upload_file(self, path, *, mime=None, model=None, source="cli",
+                          display_name=None, key=None, sha256=None,
+                          ready_timeout_s=30.0) -> UploadedFile:
+        if self.upload_error:
+            raise self.upload_error
+        from pathlib import Path as _P
+
+        self.uploads.append({"path": str(path), "mime": mime, "model": model,
+                             "source": source, "display_name": display_name})
+        n = len(self.uploads)
+        return UploadedFile(name=f"files/f{n}", uri=f"https://provider.test/files/f{n}",
+                            mime=mime or "application/octet-stream",
+                            size=_P(path).stat().st_size, state="ACTIVE",
+                            expires_at=self.expiry, sha256=sha256 or "a" * 64,
+                            key_id=key_id(self.KEY))
+
+    async def count_file_tokens(self, model, uri, mime, *, key_id=None) -> int:
+        self.file_counts.append((model, uri, mime))
+        return self.file_tokens
+
+    async def complete(self, req, on_event=None, files=None) -> RouterResult:
         if self.raise_quota:
             raise QuotaExhaustedError(self.budgets, "2026-10-09T07:00:00+00:00",
                                       hint="test")
         self.calls.append(req)
+        self.files_seen.append(list(files or []))
         if on_event:
             on_event(RouterEvent(stage="dispatch", model="gemini-3.8-flash",
                                  key_id="fake", detail={"est_tokens": req.est_tokens or 0}))
