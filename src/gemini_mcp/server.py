@@ -21,6 +21,7 @@ from .tools import (
     Deps,
     _jobbed,
     analyze_file_tool,
+    analyze_files_tool,
     analyze_large_tool,
     analyze_result_tool,
     file_upload_ticket_tool,
@@ -324,6 +325,46 @@ def build_server(deps: Deps) -> MCPServer:
             "result_max_chars": result_max_chars},
             wait_seconds,
             lambda em, pr: analyze_file_tool(deps, em, pr))
+
+    @srv.tool()
+    async def analyze_files(
+        task: str,
+        upload_ids: list[str],
+        thinking_level: Literal["low", "medium", "high"] | None = None,
+        output_format: Literal["text", "json"] = "text",
+        max_output_tokens: int | None = None,
+        model: str | None = None,
+        overflow: Literal["off", "lite", "lite+gemma"] = "off",
+        route: Literal["optimal", "best_available"] | None = None,
+        wait_for_minute_limits: bool | None = None,
+        chunk_tokens: int | None = None,
+        overlap_ratio: float | None = None,
+        request_id: str | None = None,
+        result_max_chars: int | None = None,
+        wait_seconds: int | None = 25,
+        ctx: Context | None = None,
+    ) -> dict:
+        """Analyze SEVERAL uploaded files with ONE answer (one ticket + upload per file
+        first, then analyze_files(upload_ids=[...], task)). Text documents each keep the
+        chunked pipeline; PDFs/images/audio/video are measured for free and packed by
+        measured tokens into as few group requests as fit the serving key's minute
+        budget — one file is never split, and a file that alone exceeds the budget is
+        refused with its measured cost. All parts are consolidated into one final result.
+        A single upload_id delegates to analyze_file. Same knobs, reporting rules
+        (relay 'report') and ticket behaviour as analyze_file.
+
+        Returns: {report, result, meta{…, files[per-file facts], groups[per-group
+        facts], parts, consolidation_rounds}} or {status:'running', request_id}."""
+        emitter = ProgressEmitter(ctx, deps.logger)
+        return await _jobbed(deps, "analyze_files", emitter, {
+            "task": task, "upload_ids": upload_ids, "thinking_level": thinking_level,
+            "output_format": output_format, "max_output_tokens": max_output_tokens,
+            "model": model, "overflow": overflow, "route": route,
+            "wait": wait_for_minute_limits, "chunk_tokens": chunk_tokens,
+            "overlap_ratio": overlap_ratio, "request_id": request_id,
+            "result_max_chars": result_max_chars},
+            wait_seconds,
+            lambda em, pr: analyze_files_tool(deps, em, pr))
 
     @srv.tool()
     async def quota_status(ctx: Context | None = None) -> dict:

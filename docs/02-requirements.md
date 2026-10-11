@@ -66,6 +66,14 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   (`predicted`/`measured`/`pct`) and the report MUST instruct the agent to tell the
   owner; the miss is recorded as a non-spending ledger row which `doctor` and `quota`
   surface while it is recent. A miss is a signal, never an error.
+
+- FR-B13 `analyze_files(task, upload_ids=[…])` MUST analyze several uploaded files with
+  one answer: text documents each keep the chunked pipeline; binaries are uploaded,
+  measured with the free count, then packed first-fit-decreasing by measured tokens
+  against the serving key's minute budget (uploads are per key, so a pack never crosses
+  keys) into as few group requests as fit, and all parts consolidate into one result.
+  One file is never split; a file that alone exceeds the budget is refused with its
+  measured cost and zero generate spend. A single id delegates to `analyze_file`.
   to the provider's Files API (option A, owner decision 2026-10-11): one upload, one
   request pinned to the key that owns the file, one measured token count before the
   request so the TPM gate is honest. A single file is never split. Text the server can

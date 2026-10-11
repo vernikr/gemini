@@ -48,7 +48,9 @@ class FakeRouter:
         self.cfg = cfg or SimpleNamespace(
             overflow_tiers=["gemini-3.5-flash-lite", "gemma-auto"],
             overflow_limits=SimpleNamespace(rpd=500),
+            limits_per_key_model=SimpleNamespace(rpd=20, rpm=5, tpm=250000),
             quota_day_tz="America/Los_Angeles",
+            window_s=60.0, planned_ttl_s=300.0,
             chain=["gemini-3.8-flash", "gemini-3-flash-preview"],
             api_keys=[self.KEY])
         # a real in-memory ledger: router_logs and the drift record path run against the
@@ -92,11 +94,12 @@ class FakeRouter:
             on_event(RouterEvent(stage="dispatch", model="gemini-3.8-flash",
                                  key_id="fake", detail={"est_tokens": req.est_tokens or 0}))
         if req.kind == "chunk":
-            mm = re.search(r"CHUNK (\d+)/(\d+)", req.prompt)
+            mm = re.search(r"(?:CHUNK|GROUP) (\d+)/(\d+)", req.prompt)
             if mm and int(mm.group(1)) in self.fail_chunks:
                 raise RouterError("simulated chunk failure")
         if req.kind == "chunk":
-            text = f"analysis-of-chunk-{mm.group(1)}-of-{mm.group(2)}"
+            label = "group" if "GROUP" in req.prompt else "chunk"
+            text = f"analysis-of-{label}-{mm.group(1)}-of-{mm.group(2)}"
             if mm and int(mm.group(1)) in self.empty_chunks:
                 text = ""                     # thinking-starved answer (router v0.1.1)
         elif req.kind == "consolidate":

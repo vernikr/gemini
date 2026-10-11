@@ -316,6 +316,16 @@ Flow:
    the noise floor lands as `meta.cost.drift` plus a one-line instruction to tell the owner
    and a non-spending ledger row that `doctor`/`quota` surface. A pdf with unknown page
    count gets no prediction, and a miss never fails the request.
+
+   Several files, one answer (FR-B13, `analyze_files`): each text document keeps its own
+   pipeline run; each binary is uploaded (or its reference reused) and token-measured for
+   free, then packs are built first-fit-decreasing against the serving key's remaining
+   minute budget minus a prompt overhead — uploads are per key, so a pack never crosses
+   keys, and the router's per-modality file capability decides which models may serve a
+   pack. Every pack is one request with its files pinned (`kind='chunk'`); a single file
+   is never split, and a file that alone exceeds the budget is refused with its measured
+   cost before any generate spend. Pack answers and text answers consolidate through the
+   same recursive fan-in as chunked bodies.
 4. Retention (FR-E9): blobs, sidecars and spent-ticket markers age out at `keep_hours`,
    the total is capped by `total_cap_mb` (oldest first); prune runs on ticket issuance,
    at the start of every `analyze_file` and on demand via `gemini-mcp prune`, so an

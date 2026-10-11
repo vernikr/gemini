@@ -104,7 +104,12 @@ async def test_server_registers_tools_with_expected_schema(tmp_path):
     tools = await srv.list_tools()
     assert {t.name for t in tools} == {"analyze_large", "gemini_generate",
                                        "analyze_result", "file_upload_ticket",
-                                       "analyze_file", "quota_status", "router_logs"}
+                                       "analyze_file", "analyze_files", "quota_status",
+                                       "router_logs"}
+    af = next(t for t in tools if t.name == "analyze_files")
+    af_props = (getattr(af, "inputSchema", None) or af.input_schema)["properties"]
+    assert {"task", "upload_ids"} <= set(af_props)
+    assert af_props["upload_ids"]["type"] == "array"
     al = next(t for t in tools if t.name == "analyze_large")
     schema = getattr(al, "inputSchema", None) or al.input_schema
     props = schema["properties"]

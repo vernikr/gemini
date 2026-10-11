@@ -211,6 +211,14 @@ Pasting raw file contents into
 `gemini_generate`/`analyze_large` is rejected (`raw_document_inlined`): markup like RTF
 is unreadable for the model (non-ASCII text survives as hex escapes).
 
+Several files, one answer: repeat ticket + upload for each file, then call
+`analyze_files(task, upload_ids=[…])`. Text documents keep the chunked pipeline each;
+PDFs/images/audio are measured for free and packed by measured tokens into as few group
+requests as fit the key's minute budget, then everything consolidates into ONE result
+(`meta.groups` lists the packs, `meta.files` the per-file facts). A single file is never
+split; a file that alone exceeds the budget is refused with its measured cost — analyze
+it on its own instead. One `upload_id` behaves exactly like `analyze_file`.
+
 PDFs are never split into parts: one file is one request, and `meta.file.tokens` carries
 the measured cost. Media is processed at `ingest.media_resolution` — default `high` (the
 owner's call, 2026-10-11: the per-image cost is small next to the minute limits, and scans

@@ -40,6 +40,7 @@ from .jobs import JobManager
 from .logging_setup import AuditLogger
 from .pipeline import AnalyzeParams, Pipeline, PlanBudgetError
 from .progress import ProgressEmitter
+from .prompts import group_prompt
 
 
 @dataclass(slots=True)
@@ -162,7 +163,10 @@ _DOC_MARKERS = (("{\\rtf1", "RTF"), ("%PDF-", "PDF"), ("PK\x03\x04", "DOCX/XLSX 
 # payloads — quota_status, which agents reliably call first, and the raw-document
 # rejection — but both are this string, so the steps cannot drift apart.
 FILE_FLOW = ("file_upload_ticket(filename, size_bytes) \u2192 HTTP PUT the bytes to the "
-             "returned upload_url \u2192 analyze_file(upload_id, task). Text documents "
+             "returned upload_url \u2192 analyze_file(upload_id, task). Several files "
+             "with one answer: repeat ticket+upload per file, then "
+             "analyze_files(upload_ids=[\u2026], task) — media is packed by measured "
+             "tokens into group requests and consolidated. Text documents "
              "are extracted server-side (pandoc/RTF) and chunked; PDFs, images and "
              "audio go to the provider's Files API. Never inline "
              "raw file contents into a text tool: the markup is unreadable for the model "
@@ -433,6 +437,37 @@ def _cached_upload(router: Router, loaded: _Loaded) -> UploadedFile | None:
                         sha256=ref.get("sha256"), key_id=ref["key_id"])
 
 
+def _drift_for(mime: str, pages: int | None, level: str | None,
+               measured: int) -> tuple[dict | None, str]:
+    """The wave-1 drift signal, shared by the single-file and group paths: compare the
+    router's tariff forecast with the measured cost. A pdf without a page count has no
+    honest forecast. Returns (drift-or-None, media class)."""
+    cls = media_class(mime)
+    if not measured or (cls == "pdf" and not pages):
+        return None, cls
+    try:
+        predicted = forecast_media_tokens(mime, pages=pages or 1, level=level)
+    except ValueError:
+        return None, cls
+    return check_drift(predicted, measured), cls
+
+
+def _record_drift(deps: Deps, router: Router, key_id_: str, model: str, cls: str,
+                  level: str | None, drift: dict, source: str = "mcp") -> None:
+    led = getattr(router, "ledger", None)
+    if led is not None and hasattr(led, "record_drift"):
+        led.record_drift(key_id=key_id_, model=model, media_cls=cls,
+                         level=level or DEFAULT_LEVEL.get(cls, ""),
+                         predicted=drift["predicted"], measured=drift["measured"],
+                         source=source)
+
+
+def _drift_report_line(cls: str, drift: dict) -> str:
+    return (f" · COST DRIFT: {cls} predicted {drift['predicted']} tokens, measured "
+            f"{drift['measured']} ({drift['pct']:+.1f}%) — tell the owner the "
+            "router's media tariff table is stale and needs re-measuring")
+
+
 async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: dict,
                                   inbox: Path, upload_id: str, loaded: _Loaded) -> dict:
     """PDF / image / audio / video: upload once, measure the tokens, then one request
@@ -480,15 +515,7 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
     # Wave 1 drift signal: the router's tariff table predicted the cost before this call;
     # a miss is a note for the owner, never an error — the request ran on the measurement.
     # A pdf with unknown page count has no honest forecast, so it gets no prediction.
-    drift, cls = None, media_class(up.mime)
-    if file_tokens and (cls != "pdf" or loaded.pages):
-        try:
-            predicted = forecast_media_tokens(up.mime, pages=loaded.pages or 1,
-                                              level=up.media_resolution)
-        except ValueError:
-            predicted = None
-        if predicted:
-            drift = check_drift(predicted, file_tokens)
+    drift, cls = _drift_for(up.mime, loaded.pages, up.media_resolution, file_tokens)
     req = RouterRequest(prompt=task, system=params.get("system"),
                         thinking_level=params.get("thinking_level")
                         or deps.app_cfg.thinking.default,
@@ -518,12 +545,7 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
                                   "expires_at": up.expires_at, "key_id": up.key_id}}}
     if drift:
         meta["cost"] = {"drift": drift}
-        led = getattr(router, "ledger", None)
-        if led is not None and hasattr(led, "record_drift"):
-            led.record_drift(key_id=up.key_id, model=res.model, media_cls=cls,
-                             level=up.media_resolution or DEFAULT_LEVEL.get(cls, ""),
-                             predicted=drift["predicted"], measured=drift["measured"],
-                             source="mcp")
+        _record_drift(deps, router, up.key_id, res.model, cls, up.media_resolution, drift)
     deps.audit.record({"ts": time.time(), "tool": "analyze_file", "upload_id": upload_id,
                        "filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
                        "file_tokens": file_tokens, "via": "files_api",
@@ -534,10 +556,247 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
               + (f", {up.media_resolution}" if up.media_resolution else "")
               + f") via Files API · {_report(meta)}")
     if drift:
-        report += (f" · COST DRIFT: {cls} predicted {drift['predicted']} tokens, measured "
-                   f"{drift['measured']} ({drift['pct']:+.1f}%) — tell the owner the "
-                   "router's media tariff table is stale and needs re-measuring")
+        report += _drift_report_line(cls, drift)
     return {"report": report, "result": res.text, "meta": meta}
+
+
+def _pack_bins(items: list[dict], budget: int, overhead: int) -> tuple[list, list]:
+    """First-fit-decreasing by measured tokens. One pack = one request, so its files
+    must fit the budget together with the per-request prompt overhead. Returns
+    (packs, refused): a file that alone exceeds the budget is refused — never split."""
+    packs: list[list[dict]] = []
+    sizes: list[int] = []
+    refused: list[dict] = []
+    for it in sorted(items, key=lambda x: -(x["tokens"] or 0)):
+        need = (it["tokens"] or 0) + overhead
+        if need > budget:
+            refused.append(it)
+            continue
+        for i, pack in enumerate(packs):
+            if sizes[i] + need <= budget:
+                pack.append(it)
+                sizes[i] += need
+                break
+        else:
+            packs.append([it])
+            sizes.append(need)
+    return packs, refused
+
+
+async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
+    """C2: several files, one answer. Text documents each keep the chunked pipeline;
+    binaries are uploaded, token-measured for free, then packed by measured tokens
+    against the serving key's minute budget into as few requests as fit (uploads are
+    per key, so packs never cross keys). The parts are consolidated into one result.
+    A single file is never split; one that alone exceeds the budget is refused with
+    its measured cost."""
+    cfgi = deps.app_cfg.ingest
+    inbox = Path(cfgi.dir)
+    ids: list[str] = list(params.get("upload_ids") or [])
+    if not ids:
+        raise ToolError(json.dumps({"error": "missing_upload_ids",
+                                    "hint": "pass upload_ids from file_upload_ticket"}))
+    if len(ids) == 1:                      # one file is the C1 contract, unchanged
+        return await analyze_file_tool(deps, emitter, {**params, "upload_id": ids[0]})
+    await asyncio.to_thread(ingest.prune, inbox, cfgi.keep_hours, cfgi.total_cap_mb)
+    t0 = time.time()
+    loadeds: list[tuple[str, _Loaded]] = []
+    for i, uid in enumerate(ids, 1):
+        await emitter.stage("loading", i * 10 // len(ids),
+                            f"loading file {i}/{len(ids)}")
+        try:
+            loadeds.append(
+                (uid, await asyncio.to_thread(_load_and_extract, inbox, uid, cfgi)))
+        except ingest.IngestError as e:
+            deps.audit.record({"ts": time.time(), "tool": "analyze_files",
+                               "upload_id": uid, "error": e.payload["error"]})
+            raise ToolError(json.dumps(e.payload, ensure_ascii=False)) from e
+
+    router, ovf, route = _apply_route(deps, params.get("route"), params.get("overflow"))
+    level = getattr(cfgi, "media_resolution", "") or ""
+    task = params["task"]
+    thinking = params.get("thinking_level") or deps.app_cfg.thinking.default
+    rid = params.get("request_id")
+    pipe = Pipeline(router, deps.app_cfg, emitter, deps.logger)
+    ap = AnalyzeParams(task=task, thinking_level=thinking,
+                       output_format=params.get("output_format", "text"),
+                       max_output_tokens=params.get("max_output_tokens"),
+                       model=params.get("model"), overflow=ovf,
+                       wait=params.get("wait"), request_id=rid, source="mcp")
+    on_ev = emitter.router_event_sync
+    answers: dict[int, str] = {}
+    files_meta: list[dict] = []
+    drift_lines: list[str] = []
+    part_no = 0
+    text_spent = text_hits = 0
+    group_spent = group_hits = 0
+    models_used: list[str] = []
+
+    # -- text documents: each runs its own pipeline, exactly like the single-file path
+    for uid, loaded in loadeds:
+        if loaded.text is None:
+            continue
+        filename = loaded.side.get("filename")
+        part_no += 1
+        await emitter.stage("text_pipeline", 15,
+                            f"{filename}: {len(loaded.text)} chars → chunked pipeline")
+        sub = {k: v for k, v in params.items() if k not in ("upload_ids", "upload_id")}
+        sub["body"] = loaded.text
+        sub["request_id"] = f"{rid}:t{part_no}" if rid else None
+        out = await analyze_large_tool(deps, emitter, sub)
+        answers[part_no] = out["result"]
+        m = out["meta"]
+        text_spent += m.get("requests_spent", 0)
+        text_hits += m.get("cache_hits", 0)
+        models_used += m.get("models_used") or []
+        files_meta.append({"upload_id": uid, "filename": filename, "bytes": loaded.nbytes,
+                           "chars": len(loaded.text), "encoding": loaded.enc,
+                           "extractor": loaded.extractor, "via": "text"})
+
+    # -- binaries: upload (or reuse), measure for free, then pack by measured tokens
+    bins: list[dict] = []
+    for uid, loaded in loadeds:
+        if loaded.text is not None:
+            continue
+        filename = loaded.side.get("filename")
+        model = params.get("model") or router.cfg.chain[0]
+        up = _cached_upload(router, loaded)
+        if up is not None and level:
+            up = up.with_resolution(level)
+        if up is None:
+            await emitter.stage("uploading", 25,
+                                f"{filename}: {loaded.nbytes} bytes → provider Files API "
+                                f"({loaded.enc})")
+            try:
+                up = await router.upload_file(loaded.path, mime=loaded.enc, model=model,
+                                              source="mcp", display_name=filename)
+            except QuotaExhaustedError as e:
+                raise _fail(deps, emitter, "analyze_files", rid, e) from e
+            except RouterError as e:
+                raise _fail(deps, emitter, "analyze_files", rid, _UPLOAD_FAILED) from e
+            await asyncio.to_thread(ingest.save_provider_ref, inbox, uid, {
+                "name": up.name, "uri": up.uri, "mime": up.mime,
+                "expires_at": up.expires_at, "key_id": up.key_id, "sha256": up.sha256})
+        if up.media_resolution is None and level:
+            up = up.with_resolution(level)
+        try:
+            measured = await router.count_file_tokens(
+                model, up.uri, up.mime, key_id=up.key_id,
+                media_resolution=up.media_resolution)
+        except (RouterError, QuotaExhaustedError) as e:      # a measurement, never fatal
+            deps.logger.warning("count_file_tokens failed (%s) — packing blind", e)
+            measured = 0
+        drift, _ = _drift_for(up.mime, loaded.pages, up.media_resolution, measured)
+        if drift:
+            cls = media_class(up.mime)
+            _record_drift(deps, router, up.key_id, model, cls, up.media_resolution, drift)
+            drift_lines.append(_drift_report_line(cls, drift))
+        bins.append({"upload_id": uid, "filename": filename, "loaded": loaded, "up": up,
+                     "tokens": measured, "drift": drift})
+        await emitter.stage("measured", 35,
+                            f"{filename}: {measured} tokens"
+                            + (f" ({up.media_resolution})" if up.media_resolution else ""))
+
+    groups_meta: list[dict] = []
+    k = 0
+    if bins:
+        overhead = max(1, len(task) // 4) + 64
+        model0 = params.get("model") or router.cfg.chain[0]
+        tpm_limit = router.cfg.limits_per_key_model.tpm
+        by_key: dict[str, list[dict]] = {}
+        for it in bins:
+            by_key.setdefault(it["up"].key_id, []).append(it)
+        packs: list[list[dict]] = []
+        refused: list[dict] = []
+        for kid, items in by_key.items():
+            spent = router.ledger.window_usage(
+                kid, model0, time.time() - router.cfg.window_s,
+                time.time() - router.cfg.planned_ttl_s)[1]
+            budget = max(overhead + 1, tpm_limit - spent)
+            pk, rf = _pack_bins(items, budget, overhead)
+            packs += pk
+            refused += rf
+        if refused:
+            raise ToolError(json.dumps({
+                "error": "group_file_over_budget",
+                "refused": [{"filename": r["filename"], "measured_tokens": r["tokens"]}
+                            for r in refused],
+                "hint": "these files alone exceed the key's minute token budget; "
+                        "analyze them one at a time with analyze_file"},
+                ensure_ascii=False))
+        k = len(packs)
+        n_text = sum(1 for _, ld in loadeds if ld.text is not None)
+        await emitter.stage("packed", 45,
+                            f"{len(bins)} binaries → {k} group request(s), "
+                            f"{n_text} text doc(s)")
+        for gi, pack in enumerate(packs, 1):
+            names = ", ".join(it["filename"] for it in pack)
+            toks = sum(it["tokens"] for it in pack)
+            await emitter.stage("group", 45 + 40 * gi // max(1, k),
+                                f"group {gi}/{k}: {len(pack)} file(s), {toks} tokens")
+            req = RouterRequest(
+                prompt=group_prompt(task, gi, k, names), thinking_level=thinking,
+                output_format=ap.output_format, max_output_tokens=ap.max_output_tokens,
+                model=ap.model, overflow=ovf, wait=ap.wait,
+                request_id=f"{rid}:g{gi}" if rid else None, source="mcp",
+                kind="chunk", est_tokens=toks + overhead)
+            try:
+                res = await router.complete(req, on_event=on_ev,
+                                            files=[it["up"] for it in pack])
+            except QuotaExhaustedError as e:
+                raise _fail(deps, emitter, "analyze_files", rid, e) from e
+            if not (res.text or "").strip():
+                raise RouterError(f"empty answer from {res.model} on group {gi}")
+            if res.cached:
+                group_hits += 1
+            else:
+                group_spent += 1
+            part_no += 1
+            answers[part_no] = res.text
+            models_used.append(res.model)
+            groups_meta.append({"group": gi,
+                                "files": [it["filename"] for it in pack],
+                                "tokens": toks, "model": res.model})
+            for it in pack:
+                files_meta.append({
+                    "upload_id": it["upload_id"], "filename": it["filename"],
+                    "bytes": it["loaded"].nbytes, "mime": it["up"].mime,
+                    "tokens": it["tokens"], "resolution": it["up"].media_resolution,
+                    "via": "files_api", "group": gi,
+                    "provider": {"name": it["up"].name, "uri": it["up"].uri,
+                                 "expires_at": it["up"].expires_at,
+                                 "key_id": it["up"].key_id}})
+
+    # -- one final answer from all parts
+    rounds = 0
+    if len(answers) == 1:
+        result = next(iter(answers.values()))
+    else:
+        result, rounds = await pipe._consolidate(
+            ap, answers, [], part_no, thinking, 4.0,
+            deps.app_cfg.pipeline.chunk_size_tokens, on_ev)
+
+    await emitter.stage("done", 100, f"done in {time.time() - t0:.1f}s")
+    await emitter.drain()
+    meta = {"request_id": rid, "models_used": models_used + pipe._models,
+            "model_final": (models_used + pipe._models or [None])[-1],
+            "thinking_level": thinking, "route": route, "overflow": ovf,
+            "backend": deps.backend, "files": files_meta, "groups": groups_meta,
+            "parts": part_no, "consolidation_rounds": rounds,
+            "requests_spent": pipe._spends + text_spent + group_spent,
+            "cache_hits": pipe._cache_hits + text_hits + group_hits,
+            "quota_after": router.model_budgets(),
+            "elapsed_s": round(time.time() - t0, 1), "progress_trace": emitter.trace}
+    report = (f"files={len(loadeds)} ({k} group request(s)"
+              + (f", {sum(1 for _, ld in loadeds if ld.text is not None)} text doc(s)"
+                 if any(ld.text is not None for _, ld in loadeds) else "")
+              + f", {part_no} part(s)) · {_report(meta)}")
+    report += "".join(drift_lines)
+    deps.audit.record({"ts": time.time(), "tool": "analyze_files",
+                       "request_id": rid, "upload_ids": ids, "parts": part_no,
+                       "groups": k, "requests_spent": meta["requests_spent"],
+                       "models_used": meta["models_used"], "elapsed_s": meta["elapsed_s"]})
+    return {"report": report, "result": result, "meta": meta}
 
 
 async def quota_status_tool(deps: Deps) -> dict:

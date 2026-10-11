@@ -33,6 +33,19 @@ def chunk_prompt(task: str, n: int, m: int, chunk_text: str) -> str:
             f"PART {n}/{m}:\n{chunk_text}")
 
 
+GROUP_MARKER = (
+    "[SYSTEM NOTE — GROUP {n}/{m}] You are analyzing group {n} of {m}: a set of "
+    "separate files that belong to ONE common task. Analyze the files of THIS group "
+    "together, referring to each file by name. Do NOT speculate about files outside "
+    "this group."
+)
+
+
+def group_prompt(task: str, n: int, m: int, filenames: str) -> str:
+    return (f"{GROUP_MARKER.format(n=n, m=m)}\nFiles in this group: {filenames}.\n\n"
+            f"TASK:\n{task}")
+
+
 def consolidation_prompt(task: str, parts: list[tuple[int, str]], total_m: int,
                          missing: list[int], round_no: int = 1, final: bool = True) -> str:
     head = CONSOLIDATION_NOTE.format(round=round_no) + (FINAL_RULES if final else GROUP_RULES)

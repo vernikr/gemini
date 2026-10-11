@@ -48,7 +48,14 @@ and the evidence live in `report.md` in this folder — not repeated here.
   no licence change).
 - The upload sidecar (`inbox/<id>.json`) caches `{key_id, provider_name, expires}`.
 
-## Phase C2 — groups of files, packed by measured tokens
+## Phase C2 — groups of files, packed by measured tokens · **done 2026-10-11**
+
+Delivered in gateway v0.22.0 with router v0.3.0: `analyze_files(task, upload_ids=[…])`
+measures every binary for free, packs first-fit-decreasing against the serving key's
+minute budget (never crosses keys, never splits a file), refuses over-budget files with
+measured cost and zero generate spend, consolidates packs + text pipelines into one
+answer; router gates capability per media class (pdf vs image). Tests:
+tests/test_group_files.py.
 
 - A file-groups call accepts several upload ids. Each **binary** file is uploaded and
   token-measured; packs are then built against the chosen key's remaining per-minute
