@@ -57,3 +57,11 @@ assume either.
 - The first live `AQ.…` probe after the rotation settles the remaining question — whether
   a *fresh* AI Studio key still takes the plain header. If it does, the fallback is a
   safety net rather than a daily path; if it does not, the operator never notices.
+
+## 0.20.3 — the last place that still assumed a key shape
+
+Three operator-facing strings in `setup` said `AIza…` as if it were the only shape: the
+remote-setup hint (`set GEMINI_API_KEYS=AIza…,AIza…`), the `--json` refusal and the
+"paste at least one AI Studio key" message. They now say `<key>` / "AI Studio or Cloud
+Console; both work" — the wizard is where an operator reads how to install a key, and it
+should not send anyone shopping for a particular generation.

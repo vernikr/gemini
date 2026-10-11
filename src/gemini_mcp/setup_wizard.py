@@ -142,7 +142,7 @@ def _client_snippets(backend: str, fleet: dict | None = None,
                 "git -C <dir> pull --ff-only instead of cloning)",
                 f"from inside the gemini-mcp clone: VPS_HOST={host} VPS_USER={user} "
                 "bash scripts/run_remote.sh setup   (streams its own progress)",
-                f"keys: ssh {user}@{host} and set GEMINI_API_KEYS=AIza…,AIza… in "
+                f"keys: ssh {user}@{host} and set GEMINI_API_KEYS=<key>,<key> in "
                 "/opt/apps/gemini-mcp/.env (chmod 600), then "
                 "systemctl restart gemini-mcp",
                 "THEN paste the ssh snippet below into your client config and "
@@ -385,7 +385,7 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
         report["fleet"] = fleet
     if (backend == "direct" and keys is None and json_out
             and not os.environ.get("GEMINI_API_KEYS")):
-        report["error"] = ("keys required in --json mode: pass --keys 'AIza…', "
+        report["error"] = ("keys required in --json mode: pass --keys '<key>', "
                            "--keys-file <path>, or set GEMINI_API_KEYS")
         report["ok"] = False
         return report
@@ -402,7 +402,7 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
     if backend == "direct":
         if not key_list:
             report["error"] = ("no API keys provided — re-run and paste at least one "
-                               "AI Studio key (or --keys 'AIza…')")
+                               "key (AI Studio or Cloud Console; both work)")
             report["ok"] = False
             return report
         report["key_ids"] = [key_id(k) for k in key_list]
