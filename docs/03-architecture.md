@@ -238,7 +238,7 @@ pipeline:
   consolidation_fanin: 6              # recursive reduce group size
   fail_on_chunk_error: true
   max_result_chars: 12000
-thinking: {default: high}
+thinking: {default: medium}
 server: {http_port: 8790, http_bind: 127.0.0.1, auth: bearer}
 logging: {log_max_bytes: 10485760, log_backups: 7, jsonl_keep_days: 14,
           audit_keep_days: 30, audit_max_mb: 50, dump_bodies: false}
@@ -256,7 +256,7 @@ Env (`.env`): `GEMINI_API_KEYS` (comma) or `GEMINI_API_KEY_1..10`, `GEMINI_MCP_T
 - D4: Same package serves stdio & HTTP → no shim drift; stdio works even if daemon is down.
 - D5: REST routes live on the daemon (Starlette mount), not a second service → 1 unit, 1 RAM budget.
 - D6: Overflow is per-request opt-in (user decision), never automatic → predictable spend.
-- D7: thinking default high is a service config, per-request override wins; gemma ignores it (logged).
+- D7: thinking default medium is a service config, per-request override wins; gemma ignores it (logged).
 - D8: Chunk service marker is a prompt-template file, editable without code (prompts inline in `prompts.py` as constants + optional `prompts/` dir override).
 - D9: Waiting covers minute-scale gates only (RPM/TPM/short cooldowns, capped at `wait.max_s`); waiting hours for a daily reset inside one tool call is impractical — the caller gets ETAs (progress + FR-B8 error) and decides: retry later or opt into overflow.
 - D10: File ingest = server-side helper (§10), self-hosted presigned pattern on the existing daemon (HMAC one-time URL) + scp channel — no object storage, no local shim on the client.

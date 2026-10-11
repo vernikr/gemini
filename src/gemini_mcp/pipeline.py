@@ -34,7 +34,7 @@ class PlanBudgetError(QuotaExhaustedError):
 class AnalyzeParams:
     task: str
     body: str = ""
-    thinking_level: str | None = None       # None → app default (high)
+    thinking_level: str | None = None       # None → app default (medium)
     output_format: str = "text"
     max_output_tokens: int | None = None
     model: str | None = None
