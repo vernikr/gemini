@@ -15,6 +15,13 @@ Rules kept: keys are validated before anything is written; a live probe (listMod
 no RPD) rejects a dead key unless `--force`; the write is atomic and 0600; duplicates are
 never added twice; the last key is not removed without `--force`; the service restart is
 skipped cleanly where there is no systemd.
+
+Key shape is not a gate and not a guess: classic `AIza…` (Standard) and newer `AQ.…` (AI
+Studio) keys both validate and both probe. The probe itself lives in the router's
+`keyauth`, so it tries the same transports in the same order the daemon will and reports
+which one answered — `ok (query)` here means the daemon will use the query transport too.
+A key the provider has blocked as leaked is named as such, with the remedy, instead of a
+bare 403.
 """
 from __future__ import annotations
 
@@ -27,6 +34,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from gemini_router import keyauth
 from gemini_router.config import key_id as fingerprint
 
 from .config import config_home
@@ -125,20 +133,16 @@ def validate(key: str) -> None:
 # ---------------------------------------------------------------------------- live side
 
 def probe(key: str, base: str | None = None) -> str:
-    """Free liveness check: listModels. Returns 'ok' or a one-line reason."""
-    import httpx
+    """Free liveness check: listModels, over whichever transport this key speaks.
 
-    url = f"{base or os.environ.get('GEMINI_BASE_URL') or DEFAULT_BASE}/models"
-    try:
-        r = httpx.get(url, params={"pageSize": 1},
-                      headers={"x-goog-api-key": key}, timeout=20.0)
-    except httpx.HTTPError as e:
-        return f"unreachable ({e!r})"
-    if r.status_code == 200:
-        return "ok"
-    if r.status_code in (400, 401, 403):
-        return f"rejected (HTTP {r.status_code})"
-    return f"HTTP {r.status_code}"
+    One implementation for CLI and daemon (the router's `keyauth`): the same transports in
+    the same order, so what this prints is what generateContent will do. `ok` means the
+    standard header; `ok (query)` / `ok (bearer)` mean the key needed that transport and it
+    is now remembered for the process."""
+    res = keyauth.probe_key(key, base or os.environ.get("GEMINI_BASE_URL") or DEFAULT_BASE)
+    if not res["ok"]:
+        return res["reason"]
+    return "ok" if res["transport"] == keyauth.DEFAULT_TRANSPORT else f"ok ({res['transport']})"
 
 
 def restart_service() -> str:
@@ -211,7 +215,7 @@ def run(args) -> int:
                 print(f"key pool: {path}  ({source})")
                 _print_rows(rows) if rows else print("  (empty — add one: gemini-mcp "
                                                      "keys add <key>)")
-            if rows and any(r.get("probe", "ok") != "ok" for r in rows):
+            if rows and any(not r.get("probe", "ok").startswith("ok") for r in rows):
                 return 1
             return 0
 
@@ -228,7 +232,7 @@ def run(args) -> int:
                     continue
                 if not offline:
                     verdict = probe(k)
-                    if verdict != "ok" and not force:
+                    if not verdict.startswith("ok") and not force:
                         raise KeysError(f"key {mask(k)} failed the live probe: {verdict} "
                                         "(use --offline to skip, --force to keep anyway)")
                     report["actions"].append({"key": mask(k), "fingerprint": fingerprint(k),

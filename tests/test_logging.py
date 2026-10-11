@@ -28,6 +28,13 @@ def test_redact_patterns_and_secrets():
     assert out.count("***") >= 3
 
 
+def test_redact_covers_the_aq_key_generation():
+    """AI Studio hands out `AQ.…` keys; the redactor knew only the classic `AIza…` shape,
+    so an AQ. key could reach the log in clear text. Both generations now redact."""
+    out = redact("key AQ.DUMMYtestvalue1234567890abcdef and done")
+    assert "AQ." not in out and "DUMMYtestvalue" not in out and "***" in out
+
+
 def test_redaction_filter_rewrites_record():
     f = RedactionFilter(["tok-12345678"])
     rec = logging.LogRecord("x", logging.INFO, "f", 1,

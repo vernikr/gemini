@@ -51,6 +51,39 @@ def test_add_appends_preserving_other_lines_and_order(pool):
     assert "GEMINI_ROUTER_STATE=/tmp/state.db" in body and "GEMINI_MCP_TOKEN=deadbeef" in body
 
 
+def test_probe_reports_the_transport_the_daemon_will_use(monkeypatch):
+    """`ok (query)` is a measured statement, not decoration: keyauth remembered that
+    transport for this key, and the daemon's generateContent starts there too."""
+    monkeypatch.setattr(keys_cmd.keyauth, "probe_key", lambda key, base=None, **kw: {
+        "ok": True, "transport": "query", "status": 200, "reason": "ok"})
+    assert keys_cmd.probe(K2) == "ok (query)"
+    monkeypatch.setattr(keys_cmd.keyauth, "probe_key", lambda key, base=None, **kw: {
+        "ok": True, "transport": "header", "status": 200, "reason": "ok"})
+    assert keys_cmd.probe(K1) == "ok"          # the common path stays quiet
+
+
+def test_probe_surfaces_a_leaked_key_as_itself(monkeypatch):
+    monkeypatch.setattr(keys_cmd.keyauth, "probe_key", lambda key, base=None, **kw: {
+        "ok": False, "transport": "header", "status": 403,
+        "reason": "reported as leaked — delete the key in the console, then add a fresh one"})
+    line = keys_cmd.probe(K1)
+    assert "leaked" in line and "fresh" in line
+
+
+def test_list_check_treats_a_rotated_transport_as_healthy(pool, monkeypatch, capsys):
+    """The exit code reads the verdict, not the extra word: a key that needed another
+    transport is healthy, and a script must see 0."""
+    monkeypatch.setattr(keys_cmd, "probe", lambda key, base=None: "ok (query)")
+    rc = run(["keys", "list", "--check", "--env-file", str(pool)])
+    assert rc == 0 and "ok (query)" in capsys.readouterr().out
+
+
+def test_add_accepts_a_key_that_needed_another_transport(pool, monkeypatch):
+    monkeypatch.setattr(keys_cmd, "probe", lambda key, base=None: "ok (query)")
+    rc = run(["keys", "add", K2, "--env-file", str(pool), "--no-restart", "--json"])
+    assert rc == 0 and K2 in env_text(pool)
+
+
 def test_add_is_idempotent_and_never_duplicates(pool):
     run(["keys", "add", K2, "--env-file", str(pool), "--no-restart"])
     rc = run(["keys", "add", K1, K2, "--env-file", str(pool), "--no-restart", "--json"])

@@ -72,7 +72,16 @@ gemini-mcp keys remove <n|fp>   # by index or fingerprint; the last key needs --
 
 The command finds the right file by itself — the systemd unit's `EnvironmentFile` on a
 server, the wizard's `.env` on a workstation — and restarts the service when there is one
-(`--no-restart` skips that). Several keys = several times the daily allowance, because
+(`--no-restart` skips that).
+
+On the VPS the command is on PATH for every shell (`/usr/local/bin/gemini-mcp`); when a
+host says `command not found` while the tool is installed, that shim is the missing piece.
+
+Both key generations work and neither needs a decision from you: classic `AIza…` (Cloud
+Console) and newer `AQ.…` (AI Studio). The probe runs the same code the daemon runs, and
+when a key turns out to need a different transport it says so (`ok (query)`) and keeps
+that choice for the process. A key the provider has blocked as leaked is named as such,
+with what to do about it, instead of a bare 403. Several keys = several times the daily allowance, because
 quota is counted per key × model; the router spreads calls across the pool by remaining
 budget and steps past an exhausted or rejected key on its own.
 

@@ -17,7 +17,8 @@ from rich.logging import RichHandler
 from .config import LoggingCfg
 
 SECRET_PATTERNS = [
-    re.compile(r"AIza[0-9A-Za-z_\-]{8,}"),        # Gemini API keys
+    re.compile(r"AIza[0-9A-Za-z_\-]{8,}"),        # Gemini API keys (Standard, Cloud Console)
+    re.compile(r"AQ\.[0-9A-Za-z_\-]{8,}"),         # Gemini API keys (Auth, AI Studio)
     re.compile(r"ya29\.[0-9A-Za-z_\-]+"),          # Google OAuth tokens
     re.compile(r"ghp_[A-Za-z0-9]{20,}"),           # GitHub PATs
 ]

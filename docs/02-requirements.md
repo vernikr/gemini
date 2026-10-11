@@ -87,7 +87,13 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   backoff + jitter, bounded by `provider_timeout_s`; client 4xx (except 408/429) switch
   model instead of retrying (taxonomy inherited from external-consumer `src/llm.py`).
 - **FR-C6** MUST support a key pool (`GEMINI_API_KEYS` / `GEMINI_API_KEY_1..10`);
-  selection prefers the key×model pair with the largest remaining budget.
+  selection prefers the key×model pair with the largest remaining budget. The pool is
+  generation-agnostic (owner, 2026-10-11): classic `AIza…` (Standard, Cloud Console) and
+  newer `AQ.…` (Auth, AI Studio) keys both validate, probe and serve. The transport
+  (standard header / query / bearer) is discovered per key from the provider's answer and
+  remembered — never assumed from the shape, which Google has changed under us more than
+  once (gemini-router SPEC §10). A key the provider blocked as *leaked* is reported as
+  itself with the remedy, and leaves the pool like any other dead key.
 - **FR-C7** MUST count `countTokens` pre-flight toward TPM planning but NOT toward RPD.
 - **FR-C8** Overflow (opt-in per request): tier 1 `gemini-3.5-flash-lite`, tier 2 best
   available `gemma-*` (runtime-resolved, config-overridable). Overflow usage is tagged
