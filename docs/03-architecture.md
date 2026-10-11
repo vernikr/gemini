@@ -310,7 +310,8 @@ Flow:
    - **PDF/image/audio/video** → the provider's Files API: the blob stays on disk and is
      streamed to the provider by the router library, the token cost is measured
      (`count_file_tokens`, free per FR-C7) and ONE request follows, pinned to the key that
-     owns the file (a file lives in its key's project). One file is never split.
+     owns the file (a file lives in its key's project). Exception: a PDF whose
+     measured request exceeds FULL TPM is split into page ranges (FR-B14).
    - anything else fails fast with `binary_file_needs_conversion` (ZERO spend); a PDF over
      the pre-flight ceilings fails with `pdf_too_large`/`pdf_too_many_pages`, also before
      any upload. `pdfinfo` (poppler-utils) supplies the page count; it never reads content.
@@ -329,12 +330,15 @@ Flow:
    Several files, one answer (FR-B13, `analyze_files`): each text document keeps its own
    pipeline run; each binary is uploaded (or its reference reused) and token-measured for
    free, then packs are built first-fit-decreasing against the serving key's remaining
-   minute budget minus a prompt overhead — uploads are per key, so a pack never crosses
-   keys, and the router's per-modality file capability decides which models may serve a
-   pack. Every pack is one request with its files pinned (`kind='chunk'`); a single file
-   is never split, and a file that alone exceeds the budget is refused with its measured
-   cost before any generate spend. Pack answers and text answers consolidate through the
-   same recursive fan-in as chunked bodies.
+   FULL minute budget minus a prompt overhead (a temporarily occupied minute is
+   waited out, not treated as a reason to split) — uploads are per key, so a pack never
+   crosses keys. Every pack is one request with its files pinned (`kind='chunk'`). A PDF
+   over FULL TPM instead goes through qpdf: page ranges are uploaded and re-measured
+   at the same resolution, split further if a measured range does not fit, then each
+   range gets a separate request containing that PDF part only. Ranges consolidate to
+   ONE per-file answer before any group merge; they never mix with other source files.
+   Other over-budget binaries refuse with their measured cost. Scratch files are
+   deleted after the job; group answers and per-file answers use recursive fan-in.
 4. Retention (FR-E9): blobs, sidecars and spent-ticket markers age out at `keep_hours`,
    the total is capped by `total_cap_mb` (oldest first); prune runs on ticket issuance,
    at the start of every `analyze_file` and on demand via `gemini-mcp prune`, so an

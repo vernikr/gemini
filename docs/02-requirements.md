@@ -56,6 +56,15 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   (daemon, bearer-token auth, `127.0.0.1` bind by default).
 
 - **FR-B10** `analyze_file` MUST accept PDFs, images, audio and video by sending the bytes
+  to the provider's Files API (option A, owner decision 2026-10-11): one upload, one
+  request pinned to the key that owns the file, one measured token count before the
+  request so the TPM gate is honest. Exception FR-B14 applies to PDFs over full TPM.
+  Text the server can extract (pandoc set, RTF, plain) keeps the chunked pipeline.
+  Pre-flight refusals —
+  unsupported type, provider document ceilings — spend nothing and say which limit was
+  hit. The provider reference is cached in the upload sidecar and reused until it expires
+  or its key leaves the configuration.
+
 - FR-B11: binary media (PDF, image, audio, video) is read by the provider at a
   **configurable resolution level** (`ingest.media_resolution`, default `high`):
   the level decides the token price (per-level prices and provider defaults live in ONE
@@ -72,15 +81,24 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   measured with the free count, then packed first-fit-decreasing by measured tokens
   against the serving key's minute budget (uploads are per key, so a pack never crosses
   keys) into as few group requests as fit, and all parts consolidate into one result.
-  One file is never split; a file that alone exceeds the budget is refused with its
-  measured cost and zero generate spend. A single id delegates to `analyze_file`.
-  to the provider's Files API (option A, owner decision 2026-10-11): one upload, one
-  request pinned to the key that owns the file, one measured token count before the
-  request so the TPM gate is honest. A single file is never split. Text the server can
-  extract (pandoc set, RTF, plain) keeps the chunked pipeline. Pre-flight refusals —
-  unsupported type, provider document ceilings — spend nothing and say which limit was
-  hit. The provider reference is cached in the upload sidecar and reused until it expires
-  or its key leaves the configuration.
+  Only a PDF exceeding the FULL minute TPM is split by page range at its existing
+  resolution, re-measured per chunk and consolidated to ONE per-file answer before
+  group consolidation; its parts never mix with another file in a provider request
+  or first-pass consolidation. A temporary occupied minute window does not trigger
+  splitting; other over-budget binaries refuse with measured cost and zero generate
+  spend. A single id delegates to `analyze_file`.
+
+- FR-B14: A PDF whose measured tokens + prompt exceed full per-key TPM MUST be
+  split into ordered page ranges using bounded-resource qpdf, without changing
+  media resolution. Each range MUST be re-measured before generation and subdivided
+  if it cannot fit. The provider must not see parts from different source files in
+  one request; per-file answers consolidate before joining a multi-file result.
+  Report the split with ⚠️, page ranges, and cost; fail explicitly if splitting
+  is unavailable or a single page cannot fit.
+- FR-B15: Reports MUST list all distinct models used. Each unrequested flash-lite
+  or gemma model MUST be marked ⚠️ in the agent-visible report; explicit model pins
+  are exempt. Other degraded successes carry ⚠️; failed tool calls are ⛔️ in the
+  agent-facing instructions, with a plain-language remedy. Clean success stays clean.
 
 ## C. Routing & quota (gemini-router)
 

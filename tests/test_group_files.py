@@ -1,8 +1,8 @@
 """C2: several files, one answer — packing by measured tokens (wave 2).
 
 Rules pinned here: binaries are measured for free then packed first-fit-decreasing
-against the serving key's minute budget; one file is never split, and a file that alone
-exceeds the budget is refused with its measured cost; text documents keep their own
+against the serving key's FULL minute budget; the packer never splits a file (the
+oversized-PDF branch is covered separately in test_pdf_split); text documents keep their own
 pipeline; the parts consolidate into one result. No network (b01)."""
 from __future__ import annotations
 

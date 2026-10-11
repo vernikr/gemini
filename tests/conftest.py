@@ -94,11 +94,12 @@ class FakeRouter:
             on_event(RouterEvent(stage="dispatch", model="gemini-3.8-flash",
                                  key_id="fake", detail={"est_tokens": req.est_tokens or 0}))
         if req.kind == "chunk":
-            mm = re.search(r"(?:CHUNK|GROUP) (\d+)/(\d+)", req.prompt)
+            mm = re.search(r"(?:CHUNK|GROUP|DOCUMENT PART) (\d+)/(\d+)", req.prompt)
             if mm and int(mm.group(1)) in self.fail_chunks:
                 raise RouterError("simulated chunk failure")
         if req.kind == "chunk":
-            label = "group" if "GROUP" in req.prompt else "chunk"
+            label = ("group" if "GROUP" in req.prompt else
+                     "pdf" if "DOCUMENT PART" in req.prompt else "chunk")
             text = f"analysis-of-{label}-{mm.group(1)}-of-{mm.group(2)}"
             if mm and int(mm.group(1)) in self.empty_chunks:
                 text = ""                     # thinking-starved answer (router v0.1.1)

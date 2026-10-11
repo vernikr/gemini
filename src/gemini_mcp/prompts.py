@@ -46,6 +46,20 @@ def group_prompt(task: str, n: int, m: int, filenames: str) -> str:
             f"TASK:\n{task}")
 
 
+SPLIT_MARKER = (
+    "[SYSTEM NOTE — DOCUMENT PART {n}/{m}] The PDF document '{name}' alone exceeded "
+    "the provider's per-request token budget and was split by page ranges. This "
+    "request carries part {n} of {m} ({pages}); every file in this request is a part "
+    "of THIS one document — read them in order and analyze them according to the task "
+    "as if reading the whole document. Do NOT speculate about parts you cannot see; if "
+    "a thought continues beyond this part, end your answer with '…(continues)'."
+)
+
+
+def split_prompt(task: str, name: str, n: int, m: int, pages: str) -> str:
+    return (f"{SPLIT_MARKER.format(n=n, m=m, name=name, pages=pages)}\n\nTASK:\n{task}")
+
+
 def consolidation_prompt(task: str, parts: list[tuple[int, str]], total_m: int,
                          missing: list[int], round_no: int = 1, final: bool = True) -> str:
     head = CONSOLIDATION_NOTE.format(round=round_no) + (FINAL_RULES if final else GROUP_RULES)

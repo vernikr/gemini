@@ -4,7 +4,8 @@ the Gemini Files API instead of a local extractor.
 Rules pinned here: the routing rule (what goes where), the pre-flight refusals with zero
 spend, the provider reference cached in the sidecar (reused until it expires, re-uploaded
 when the key rotates), the measured token count that feeds the TPM gate, and the fact that
-one file is one request — never split. No network (b01): the FakeRouter stands in for the
+fitting files use one request (oversized PDF is tested in test_pdf_split). No network
+(b01): the FakeRouter stands in for the
 Files API and records what it was asked to do."""
 from __future__ import annotations
 

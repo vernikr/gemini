@@ -1,6 +1,6 @@
 {
   "name": "@vernikr/gemini-mcp",
-  "version": "0.23.0",
+  "version": "0.24.0",
   "description": "One-command Gemini free-tier MCP gateway: quota-aware model routing, massive-body chunked analysis, file ingest \u2014 text extracted server-side, PDFs/images/audio read by the provider Files API \u2014 async tickets. Thin bootstrap for the Python core gemini-mcp-gateway.",
   "bin": {
     "gemini-mcp": "bin/gemini-mcp.js"

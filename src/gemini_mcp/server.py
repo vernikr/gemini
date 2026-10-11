@@ -56,6 +56,14 @@ wait_seconds (default 25). If the job needs longer, the call returns
 analyze_result(request_id) (each call waits up to its own wait_seconds) until you get
 the final {result, meta}. Never resubmit a running job: quota is already committed.
 
+VISIBLE ALERTS (required): relay ⚠️ alongside EACH unrequested flash-lite/gemma
+model appearing anywhere in the answer's `report` (a job may use several models,
+including a stronger one for final consolidation). For any degraded outcome — waits,
+retries, missing chunks, split PDF, cost drift, unexpected weaker model — show ⚠️ and
+explain the reason, not just the symbol. For a failed tool call or an answer that could
+not be produced at all, prefix your user-facing message with ⛔️ and explain the
+recovery step. Never mark a fully successful clean run as an error.
+
 REPORTING (required): every analyze_large/gemini_generate/analyze_file response
 starts with a one-line 'report' field: route · thinking level · final model ·
 requests spent · 'clean run' or rough_edges count. ALWAYS relay that line to the
@@ -118,6 +126,9 @@ def _tool_error_response(e: Exception) -> JSONResponse:
     except json.JSONDecodeError:
         return JSONResponse({"error": "tool_error", "detail": raw[:500]}, status_code=400)
     code = payload.get("error") if isinstance(payload, dict) else None
+    if isinstance(payload, dict):
+        payload.setdefault("agent_notice", "⛔️ Tell the user the call failed and "
+                           "explain the remedy; never silently skip the error.")
     return JSONResponse(payload, status_code=_TOOL_ERROR_STATUS.get(code, 400))
 
 
@@ -298,9 +309,11 @@ def build_server(deps: Deps) -> MCPServer:
         - text documents (.txt .md .csv, RTF, and pandoc's set: docx/odt/epub/html) are
           extracted server-side and run the chunked analyze_large pipeline;
         - PDFs, images, audio and video go to the provider's Files API: one upload, one
-          measured request (meta.file.tokens carries the measurement; the file is never
-          split). Media is read at ingest.media_resolution (default high; the level sets
-          the measured cost — meta.file.resolution reports it). A second analyze_file
+          measured request (meta.file.tokens carries the measurement). Media is read
+          at ingest.media_resolution (default high; meta.file.resolution reports it).
+          Only a PDF whose
+          measured cost exceeds the FULL per-key minute TPM is split by page ranges;
+          parts are analyzed sequentially, then consolidated per file. A second analyze_file
           on the same upload_id reuses the uploaded file
           until the provider expires it — a repeat question is cheap and fast. Measured
           on the production daemon: an upload reaches ACTIVE in ~2 s and a fresh file
@@ -350,8 +363,9 @@ def build_server(deps: Deps) -> MCPServer:
         first, then analyze_files(upload_ids=[...], task)). Text documents each keep the
         chunked pipeline; PDFs/images/audio/video are measured for free and packed by
         measured tokens into as few group requests as fit the serving key's minute
-        budget — one file is never split, and a file that alone exceeds the budget is
-        refused with its measured cost. All parts are consolidated into one final result.
+        budget. Only a PDF exceeding FULL minute TPM is split; its parts are
+        analyzed alone, consolidated per file, and ONLY THEN merged with other files.
+        Other over-budget binaries are refused with their measured cost.
         A single upload_id delegates to analyze_file. Same knobs, reporting rules
         (relay 'report') and ticket behaviour as analyze_file.
 
@@ -470,7 +484,9 @@ def build_server(deps: Deps) -> MCPServer:
                     "ticket_consumed": 409,
                     "file_too_large": 413, "size_mismatch": 413,
                     "ingest_disabled": 503}.get(e.payload["error"], 400)
-            return JSONResponse(e.payload, status_code=code)
+            return JSONResponse({**e.payload, "agent_notice":
+                                 "⛔️ Tell the user the upload failed and explain the hint."},
+                                status_code=code)
         deps.logger.info("ingest: stored %s (%d bytes)", uid, path.stat().st_size)
         return JSONResponse({"ok": True, "upload_id": uid, "bytes": len(data),
                              "next": f"call analyze_file(task=…, upload_id='{uid}')"})

@@ -202,6 +202,12 @@ one answer), `analyze_result` (async ticket poll), `quota_status`, `router_logs`
 compute answer starts with a one-line `report` (`backend=direct · route=… · model=… ·
 req=N · …s · clean run`) — the agent should relay it.
 
+The one-line `report` shows EVERY distinct model used; an unrequested flash-lite or
+gemma is shown as `⚠️ model-name` even if a stronger model made the final summary.
+Relay the ⚠️ and its reason for any retry, wait, incomplete chunk, split PDF, or cost
+drift. If the call failed entirely, prefix your explanation with ⛔️ and give the
+recovery step. Neither sign belongs on a clean run.
+
 While a job runs, each `{status:'running'}` ticket carries `live`: the current phase
 (`generating`, `waiting_rpm`/`waiting_tpm`, `chunking`, `consolidating`, …), `eta_s`
 while a quota gate is being waited out (counts down on every poll), the model, the key
@@ -220,13 +226,21 @@ is unreadable for the model (non-ASCII text survives as hex escapes).
 Several files, one answer: repeat ticket + upload for each file, then call
 `analyze_files(task, upload_ids=[…])`. Text documents keep the chunked pipeline each;
 PDFs/images/audio are measured for free and packed by measured tokens into as few group
-requests as fit the key's minute budget, then everything consolidates into ONE result
-(`meta.groups` lists the packs, `meta.files` the per-file facts). A single file is never
-split; a file that alone exceeds the budget is refused with its measured cost — analyze
-it on its own instead. One `upload_id` behaves exactly like `analyze_file`.
+requests as fit the key's full minute budget, then everything consolidates into ONE
+result (`meta.groups` lists the packs, `meta.files` the per-file facts). A PDF that
+alone exceeds the full quota is split by page ranges and consolidated into ONE answer
+for that file before any other files are merged; its chunks are NEVER mixed with other
+files in a provider request. Other over-budget binaries refuse with their measured
+cost. One `upload_id` behaves exactly like `analyze_file`.
 
-PDFs are never split into parts: one file is one request, and `meta.file.tokens` carries
-the measured cost. Media is processed at `ingest.media_resolution` — default `high` (the
+PDFs fitting the full minute budget are not split merely because the window is
+occupied — the router can wait for it. Oversized PDFs are cut server-side by qpdf;
+`meta.file.split` or `meta.files[].split` lists page ranges and the resolution.
+`meta.file.tokens` carries the original measured cost. Install `qpdf` on the machine
+running gemini-mcp to enable page-range cutting (`sudo apt install qpdf` on Ubuntu,
+`brew install qpdf` on macOS); `pdfinfo` (poppler) is required for the page count.
+Without either binary an oversized PDF fails with an explicit ⛔️ recovery hint; files
+that fit still work. Media is processed at `ingest.media_resolution` — default `high` (the
 owner's call, 2026-10-11: the per-image cost is small next to the minute limits, and scans
 keep their small print). The level is the price: per-level prices, the provider defaults
 and their provenance live in ONE table — `gemini_router.tariffs.MEDIA_TARIFFS` in the

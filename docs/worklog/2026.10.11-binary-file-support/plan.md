@@ -96,3 +96,7 @@ tests/test_group_files.py.
   the gateway's count and the provider's `countTokens` (1120/page). Images at `high` = 1089.
 - **The upload is per key** (separate accounts), so a group whose files were uploaded under
   one key can only be packed for that key's models — exactly the `pins` rule C1 shipped.
+
+**2026-10-11 follow-up:** The never-split policy below is historical (Wave 2).
+Oversized PDFs are now split under the owner-approved full-TPM exception; see
+`docs/worklog/2026.10.11-large-pdf-splitting/plan.md`.

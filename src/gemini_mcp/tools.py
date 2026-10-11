@@ -11,6 +11,8 @@ import asyncio
 import json
 import logging
 import os
+import shutil
+import tempfile
 import time
 import uuid
 from collections.abc import Callable
@@ -38,9 +40,10 @@ from . import ingest
 from .config import AppCfg
 from .jobs import JobManager
 from .logging_setup import AuditLogger
+from .pdf_split import PdfSplitError, split_pages
 from .pipeline import AnalyzeParams, Pipeline, PlanBudgetError
 from .progress import ProgressEmitter
-from .prompts import group_prompt
+from .prompts import group_prompt, split_prompt
 
 
 @dataclass(slots=True)
@@ -63,16 +66,32 @@ _ROUGH_STAGES = ("router:retry", "router:waiting", "router:switch", "router:paci
 _ROUGH_KEYS = ("retry", "503", "fallback", "failed", "cooldown", "overload", "timeout")
 
 
+def _fallback_model(model: str | None) -> bool:
+    return bool(model and ("flash-lite" in model.lower() or
+                           "gemma" in model.lower()))
+
+
 def _report(meta: dict) -> str:
-    """One-line report the agent MUST relay to chat — travels in the payload because
-    clients truncate tool descriptions (postmortem p01 follow-up)."""
+    """One-line agent-facing receipt: flag every unrequested weak-tier model used.
+
+    The host must be explicitly told which model(s) served the call, not just the
+    final consolidation model (a strong final model can mask weaker partials).
+    """
     rough = [e for e in meta.get("progress_trace") or []
              if e.get("stage") in _ROUGH_STAGES
              or any(k in (e.get("message") or "").lower() for k in _ROUGH_KEYS)]
+    models = list(dict.fromkeys(m for m in
+                                (meta.get("models_used") or [meta.get("model_final") or
+                                                                meta.get("model")]) if m))
+    requested = meta.get("requested_model")
+    weak = [m for m in models if _fallback_model(m) and m != requested]
+    def label(m: str) -> str:
+        return f"⚠️ {m}" if m in weak else m
+    model_part = (f"models=[{', '.join(label(m) for m in models)}]" if len(models) > 1
+                  else f"model={label(models[0]) if models else '?'}")
     parts = [f"backend={meta.get('backend', '?')}",
              f"route={meta.get('route', '?')}",
-             f"thinking={meta.get('thinking_level', '?')}",
-             f"model={meta.get('model_final') or meta.get('model') or '?'}",
+             f"thinking={meta.get('thinking_level', '?')}", model_part,
              f"req={meta.get('requests_spent', 1)}"
              + (f" (cached {meta['cache_hits']})" if meta.get("cache_hits") else ""),
              f"{meta.get('elapsed_s', meta.get('latency_s', '?'))}s"]
@@ -82,9 +101,17 @@ def _report(meta: dict) -> str:
     if rough:
         parts.append(f"rough_edges={len(rough)} (retries/waits/switches — details in "
                      f"meta.progress_trace)")
-    else:
+    if meta.get("degradations"):
+        parts.append("; ".join(meta["degradations"]))
+    if weak:
+        parts.append("unrequested lite/gemma fallback — tell the user which "
+                     "⚠️-marked models served the request")
+    if not (rough or failed or weak or meta.get("degradations") or
+            (meta.get("cost") or {}).get("drift")):
         parts.append("clean run")
-    return " · ".join(str(p) for p in parts)
+    warning = bool(rough or failed or weak or meta.get("degradations") or
+                   (meta.get("cost") or {}).get("drift"))
+    return ("⚠️ " if warning else "") + " · ".join(str(p) for p in parts)
 
 
 def _apply_route(deps: Deps, route: str | None, overflow: str | None) -> tuple[Router, str, str]:
@@ -100,13 +127,29 @@ def _apply_route(deps: Deps, route: str | None, overflow: str | None) -> tuple[R
     return router, ovf, r
 
 
+async def _marked_runner(runner, emitter: ProgressEmitter, params: dict) -> dict:
+    """Keep the recovery cue inside structured errors, not only tool descriptions."""
+    try:
+        return await runner(emitter, params)
+    except ToolError as e:
+        try:
+            payload = json.loads(str(e))
+        except (json.JSONDecodeError, TypeError):
+            payload = {"error": "tool_error", "detail": str(e)}
+        if isinstance(payload, dict):
+            payload.setdefault("agent_notice", "⛔️ Tell the user the call failed; "
+                               "explain the hint and any quota already spent.")
+            raise ToolError(json.dumps(payload, ensure_ascii=False)) from e
+        raise
+
+
 async def _jobbed(deps: Deps, tool: str, emitter: ProgressEmitter, params: dict,
                   wait_seconds: int | None,
                   runner: Callable[[ProgressEmitter, dict], Any]) -> dict:
     """wait_seconds None → classic inline run. Otherwise: background job keyed by
     request_id (generated if absent); inline wait ≤ wait_seconds, then a ticket."""
     if wait_seconds is None:
-        return await runner(emitter, params)
+        return await _marked_runner(runner, emitter, params)
     key = params.get("request_id") or f"{tool}-{uuid.uuid4().hex[:12]}"
     params = {**params, "request_id": key}
     deps.audit.record({"ts": time.time(), "tool": tool, "request_id": key,
@@ -114,7 +157,8 @@ async def _jobbed(deps: Deps, tool: str, emitter: ProgressEmitter, params: dict,
     live: dict = {}                                        # FR-G1: job → poller mirror
     status, payload = await deps.jobs.submit(
         key,
-        lambda: runner(ProgressEmitter(None, deps.logger, live=live), params),
+        lambda: _marked_runner(runner, ProgressEmitter(None, deps.logger, live=live),
+                               params),
         wait_seconds, live=live)
     if status == "done":
         return payload
@@ -206,7 +250,8 @@ async def analyze_large_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
     except (QuotaExhaustedError, PlanBudgetError) as e:
         raise _fail(deps, emitter, "analyze_large", p.request_id, e) from e
     meta = {**meta, "route": p.route, "overflow": p.overflow, "backend": deps.backend,
-            "model_final": (meta.get("models_used") or [None])[-1]}
+            "model_final": (meta.get("models_used") or [None])[-1],
+            "requested_model": p.model}
     deps.audit.record({
         "ts": time.time(), "tool": "analyze_large", "request_id": p.request_id,
         "route": p.route, "overflow": p.overflow,
@@ -244,7 +289,8 @@ async def gemini_generate_tool(deps: Deps, emitter: ProgressEmitter, params: dic
             "latency_s": res.latency_s, "cached": res.cached,
             "overflow_tier": res.overflow_tier, "quota_after": res.quota_after,
             "route": route, "overflow": ovf, "backend": deps.backend,
-            "thinking_level": req.thinking_level, "progress_trace": emitter.trace}
+            "thinking_level": req.thinking_level, "progress_trace": emitter.trace,
+            "requested_model": req.model}
     deps.audit.record({"ts": time.time(), "tool": "gemini_generate",
                        "request_id": res.request_id, "model": res.model,
                        "route": route, "overflow": ovf,
@@ -376,8 +422,8 @@ def _load_and_extract(inbox: Path, upload_id: str, cfgi) -> _Loaded:
 
 async def analyze_file_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
     """Server-side file analysis (D11): load inbox blob → sniff (unsupported → fail-fast,
-    ZERO spend) → text documents run the existing chunked pipeline, PDFs/images/audio go
-    to the provider's Files API as one measured request."""
+    ZERO spend) → text documents run the existing chunked pipeline, media goes
+    through measured Files API requests (oversized PDFs may be split)."""
     cfgi = deps.app_cfg.ingest
     inbox = Path(cfgi.dir)
     upload_id = params["upload_id"]
@@ -471,8 +517,7 @@ def _drift_report_line(cls: str, drift: dict) -> str:
 
 async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: dict,
                                   inbox: Path, upload_id: str, loaded: _Loaded) -> dict:
-    """PDF / image / audio / video: upload once, measure the tokens, then one request
-    pinned to the key that owns the file. One file is one request — never split."""
+    """Provider file: upload and measure; split only a PDF over the FULL minute TPM."""
     filename = loaded.side.get("filename")
     router, ovf, route = _apply_route(deps, params.get("route"), params.get("overflow"))
     model = params.get("model") or router.cfg.chain[0]
@@ -513,6 +558,10 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
     # The TPM gate must include the file: the router refuses a request that carries
     # files without a measured estimate, and this is that measurement.
     est = file_tokens + max(1, len(task) // 4)
+    if (up.mime == "application/pdf" and file_tokens and
+            est > router.cfg.limits_per_key_model.tpm):
+        return await _analyze_split_pdf(deps, emitter, params, loaded, up,
+                                        file_tokens, router, ovf, route)
     # Wave 1 drift signal: the router's tariff table predicted the cost before this call;
     # a miss is a note for the owner, never an error — the request ran on the measurement.
     # A pdf with unknown page count has no honest forecast, so it gets no prediction.
@@ -538,6 +587,7 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
             "overflow_tier": res.overflow_tier, "quota_after": res.quota_after,
             "route": route, "overflow": ovf, "backend": deps.backend,
             "thinking_level": req.thinking_level, "requests_spent": 0 if res.cached else 1,
+            "requested_model": req.model,
             "progress_trace": emitter.trace,
             "file": {"filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
                      "tokens": file_tokens, "resolution": up.media_resolution,
@@ -561,10 +611,153 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
     return {"report": report, "result": res.text, "meta": meta}
 
 
+_PDF_MAX_PARTS = 16
+
+
+def _pdf_split_error(code: str, filename: str, measured: int, limit: int,
+                     hint: str, **detail) -> ToolError:
+    return ToolError(json.dumps({"error": code, "filename": filename,
+                                 "measured_tokens": measured, "tpm_limit": limit,
+                                 "hint": hint, **detail}, ensure_ascii=False))
+
+
+async def _analyze_split_pdf(deps: Deps, emitter: ProgressEmitter, params: dict,
+                             loaded: _Loaded, up: UploadedFile, measured: int,
+                             router: Router, ovf: str, route: str) -> dict:
+    """Full-TPM overflow only. Measure every page-range chunk before generation.
+
+    Each provider request has files=[ONE PDF chunk]. Its answers consolidate to ONE
+    per-file answer; the multi-file caller uses only that answer, never the chunks.
+    """
+    filename = loaded.side.get("filename")
+    tpm = router.cfg.limits_per_key_model.tpm
+    pages = loaded.pages
+    if not pages:
+        raise _pdf_split_error("pdf_split_unavailable", filename, measured, tpm,
+                               "page count unavailable; cannot safely split PDF")
+    if not shutil.which("qpdf"):
+        raise _pdf_split_error("pdf_split_unavailable", filename, measured, tpm,
+                               "qpdf is not installed; nothing was analyzed")
+    task = params["task"]
+    # Reserve room for the per-part marker, task, system and request framing.
+    overhead = max(512, len(task) // 4 + len(params.get("system") or "") // 4 + 256)
+    budget = tpm - overhead
+    if budget <= 0:
+        raise _pdf_split_error("pdf_split_over_budget", filename, measured, tpm,
+                               "task alone leaves no room for a PDF page")
+    per_page = max(1, measured / pages)
+    span = max(1, int(budget * 0.9 / per_page))
+    ranges = [(first, min(pages, first + span - 1))
+              for first in range(1, pages + 1, span)]
+    if len(ranges) > _PDF_MAX_PARTS:
+        raise _pdf_split_error("pdf_split_over_budget", filename, measured, tpm,
+                               "more than 16 parts would be needed", parts=len(ranges))
+    thinking = params.get("thinking_level") or deps.app_cfg.thinking.default
+    pipe = Pipeline(router, deps.app_cfg, emitter, deps.logger)
+    ap = AnalyzeParams(task=task, thinking_level=thinking,
+                       output_format=params.get("output_format", "text"),
+                       max_output_tokens=params.get("max_output_tokens"),
+                       model=params.get("model"), overflow=ovf,
+                       wait=params.get("wait"), request_id=params.get("request_id"),
+                       source="mcp")
+    answers: dict[int, str] = {}
+    models: list[str] = []
+    hits = spent = 0
+    # Files API uploads are streamed; scratch chunk files are deleted on any exit.
+    with tempfile.TemporaryDirectory(prefix="gemini-pdf-") as td:
+        i = 0
+        while i < len(ranges):
+            first, last = ranges[i]
+            path = Path(td) / f"part-{i + 1}.pdf"
+            await emitter.stage("splitting", 10 + 70 * i / len(ranges),
+                                f"{filename}: pages {first}-{last} of {pages}")
+            try:
+                await asyncio.to_thread(split_pages, loaded.path, path, first, last)
+            except PdfSplitError as e:
+                raise _pdf_split_error("pdf_split_failed", filename, measured, tpm,
+                                       str(e), completed_parts=i) from e
+            try:
+                chunk = await router.upload_file(
+                    path, mime="application/pdf",
+                    model=params.get("model") or router.cfg.chain[0],
+                    key=next(k for k in router.cfg.api_keys if key_id(k) == up.key_id),
+                    source="mcp", display_name=f"{filename} pages {first}-{last}")
+                chunk = chunk.with_resolution(up.media_resolution) if up.media_resolution else chunk
+                tokens = await router.count_file_tokens(
+                    params.get("model") or router.cfg.chain[0], chunk.uri, chunk.mime,
+                    key_id=chunk.key_id, media_resolution=chunk.media_resolution)
+            except (QuotaExhaustedError, RouterError) as e:
+                raise _pdf_split_error("pdf_split_measure_failed", filename,
+                                       measured, tpm, f"part {first}-{last} could not be "
+                                       "uploaded/measured; no unmeasured request was sent",
+                                       completed_parts=i) from e
+            finally:
+                path.unlink(missing_ok=True)
+            if not tokens or tokens + overhead > tpm:
+                if first == last or len(ranges) >= _PDF_MAX_PARTS:
+                    raise _pdf_split_error("pdf_split_over_budget", filename,
+                                           tokens, tpm,
+                                           f"part pages {first}-{last} cannot fit; "
+                                           "nothing was sent for this part",
+                                           completed_parts=i)
+                mid = (first + last) // 2
+                ranges[i:i+1] = [(first, mid), (mid + 1, last)]
+                continue                         # retry a smaller slice; no generate spend
+            prompt = split_prompt(task, filename, i + 1, len(ranges),
+                                  f"pages {first}-{last} of {pages}")
+            req = RouterRequest(
+                prompt=prompt, thinking_level=thinking, output_format="text",
+                max_output_tokens=params.get("max_output_tokens"),
+                model=params.get("model"), overflow=ovf, wait=params.get("wait"),
+                request_id=f"{params['request_id']}:pdf{i+1}" if params.get("request_id") else None,
+                source="mcp", kind="chunk", est_tokens=tokens + overhead)
+            try:
+                res = await router.complete(req, on_event=emitter.router_event_sync,
+                                            files=[chunk])
+            except QuotaExhaustedError as e:
+                raise _fail(deps, emitter, "analyze_file", req.request_id, e) from e
+            if not (res.text or "").strip():
+                raise _pdf_split_error("pdf_split_failed", filename, measured, tpm,
+                                       f"empty answer on pages {first}-{last}",
+                                       completed_parts=i)
+            answers[i+1] = res.text
+            models.append(res.model)
+            hits += int(res.cached)
+            spent += int(not res.cached)
+            i += 1
+    if len(answers) > 1:
+        answer, rounds = await pipe._consolidate(
+            ap, answers, [], len(answers), thinking, 4.0,
+            deps.app_cfg.pipeline.chunk_size_tokens, emitter.router_event_sync)
+    else:
+        answer, rounds = next(iter(answers.values())), 0
+    await emitter.stage("done", 100, f"{filename}: {len(answers)} PDF parts analyzed")
+    await emitter.drain()
+    models += pipe._models
+    meta = {"request_id": params.get("request_id"), "model_final": models[-1],
+            "models_used": models, "thinking_level": thinking, "route": route,
+            "requested_model": params.get("model"),
+            "overflow": ovf, "backend": deps.backend,
+            "requests_spent": spent + pipe._spends,
+            "cache_hits": hits + pipe._cache_hits,
+            "progress_trace": emitter.trace, "quota_after": router.model_budgets(),
+            "file": {"filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
+                     "tokens": measured, "resolution": up.media_resolution,
+                     "via": "files_api", "split": {
+                         "pages": pages, "chunks": len(ranges),
+                         "ranges": [[a, b] for a, b in ranges],
+                         "resolution": up.media_resolution},
+                     "consolidation_rounds": rounds}}
+    meta["degradations"] = ["PDF split into page ranges to fit the full minute quota"]
+    return {"result": answer, "meta": meta,
+            "report": f"file={filename} ({pages} pages, {len(ranges)} parts) · {_report(meta)}"}
+
+
 def _pack_bins(items: list[dict], budget: int, overhead: int) -> tuple[list, list]:
     """First-fit-decreasing by measured tokens. One pack = one request, so its files
     must fit the budget together with the per-request prompt overhead. Returns
-    (packs, refused): a file that alone exceeds the budget is refused — never split."""
+    (packs, refused): non-PDF files above full TPM are refused. PDFs above full
+    TPM are removed before this packer and split by _analyze_split_pdf."""
     packs: list[list[dict]] = []
     sizes: list[int] = []
     refused: list[dict] = []
@@ -589,8 +782,8 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
     binaries are uploaded, token-measured for free, then packed by measured tokens
     against the serving key's minute budget into as few requests as fit (uploads are
     per key, so packs never cross keys). The parts are consolidated into one result.
-    A single file is never split; one that alone exceeds the budget is refused with
-    its measured cost."""
+    A PDF above full TPM is split and consolidated per file before the group merge;
+    other files above full TPM are refused with their measured cost."""
     cfgi = deps.app_cfg.ingest
     inbox = Path(cfgi.dir)
     ids: list[str] = list(params.get("upload_ids") or [])
@@ -699,22 +892,25 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
                             + (f" ({up.media_resolution})" if up.media_resolution else ""))
 
     groups_meta: list[dict] = []
+    split_spent = split_hits = 0
     k = 0
     if bins:
         overhead = max(1, len(task) // 4) + 64
-        model0 = params.get("model") or router.cfg.chain[0]
         tpm_limit = router.cfg.limits_per_key_model.tpm
         by_key: dict[str, list[dict]] = {}
+        oversized_pdfs: list[dict] = []
         for it in bins:
-            by_key.setdefault(it["up"].key_id, []).append(it)
+            if (it["up"].mime == "application/pdf" and it["tokens"] and
+                    it["tokens"] + overhead > tpm_limit):
+                oversized_pdfs.append(it)
+            else:
+                by_key.setdefault(it["up"].key_id, []).append(it)
         packs: list[list[dict]] = []
         refused: list[dict] = []
-        for kid, items in by_key.items():
-            spent = router.ledger.window_usage(
-                kid, model0, time.time() - router.cfg.window_s,
-                time.time() - router.cfg.planned_ttl_s)[1]
-            budget = max(overhead + 1, tpm_limit - spent)
-            pk, rf = _pack_bins(items, budget, overhead)
+        for items in by_key.values():
+            # A temporary minute gate is not a full-TPM overflow. Wait it out; do
+            # not turn an intact PDF into chunks merely because others spent quota.
+            pk, rf = _pack_bins(items, tpm_limit, overhead)
             packs += pk
             refused += rf
         if refused:
@@ -725,6 +921,17 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
                 "hint": "these files alone exceed the key's minute token budget; "
                         "analyze them one at a time with analyze_file"},
                 ensure_ascii=False))
+        # Refuse all non-splittable over-budget files BEFORE any split generation.
+        for it in oversized_pdfs:
+            out = await _analyze_split_pdf(
+                deps, emitter, params, it["loaded"], it["up"], it["tokens"],
+                router, ovf, route)
+            part_no += 1
+            answers[part_no] = out["result"]  # ONE per-file answer in final merge
+            models_used += out["meta"]["models_used"]
+            split_spent += out["meta"]["requests_spent"]
+            split_hits += out["meta"]["cache_hits"]
+            files_meta.append({"upload_id": it["upload_id"], **out["meta"]["file"]})
         k = len(packs)
         n_text = sum(1 for _, ld in loadeds if ld.text is not None)
         await emitter.stage("packed", 45,
@@ -782,12 +989,15 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
     meta = {"request_id": rid, "models_used": models_used + pipe._models,
             "model_final": (models_used + pipe._models or [None])[-1],
             "thinking_level": thinking, "route": route, "overflow": ovf,
+            "requested_model": params.get("model"),
             "backend": deps.backend, "files": files_meta, "groups": groups_meta,
             "parts": part_no, "consolidation_rounds": rounds,
-            "requests_spent": pipe._spends + text_spent + group_spent,
-            "cache_hits": pipe._cache_hits + text_hits + group_hits,
+            "requests_spent": pipe._spends + text_spent + group_spent + split_spent,
+            "cache_hits": pipe._cache_hits + text_hits + group_hits + split_hits,
             "quota_after": router.model_budgets(),
             "elapsed_s": round(time.time() - t0, 1), "progress_trace": emitter.trace}
+    if any("split" in f for f in files_meta):
+        meta["degradations"] = ["PDF split into page ranges to fit the full minute quota"]
     drifts = [it["drift"] for it in bins if it.get("drift")]
     if drifts:
         meta["cost"] = {"drift": drifts}
