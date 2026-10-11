@@ -46,10 +46,8 @@ Deployed 0.18.0, `gemini-3.6-flash`, serving key `b41654f0`, one real PDF and on
   tokens) — the fact that makes group packing in C2 token-cheap.
 - Provider expiry is +48 h (`2026-10-13T03:28:13Z`), matching the documented Files API
   retention; the sidecar stores it, so reuse needs no re-upload and no guesswork.
-- The first request after an upload takes ~30 s while the provider ingests the file even
-  though it already reports ACTIVE; the second answers in seconds. Both the `analyze_file`
-  description and `docs/06` now say so, so a slow first answer is not read as a hang and the
-  agent does not resubmit.
+- Timings: the ~30 s first answer we first blamed on provider-side "ingestion" is **not**
+  file handling — see the correction in §0.18.2, which also carries the measured cost model.
 
 ## 0.18.1: the probe found a reporting bug
 
@@ -79,12 +77,64 @@ dropped from it. A new test pins both directions — the routing detail dict is 
   superseded), the VPS daemon reports 0.18.1 with `gemini-mcp.service` active.
 - The tag builds run `release` only; the push to `main` runs `ci` — the earlier dedup holds.
 
+## 0.18.2: the owner challenged the numbers — re-measured, and two claims corrected
+
+The owner asked whether the ~30 s first answer was real file-digestion time and whether the
+token figures followed any official formula (images should scale with resolution, not KB).
+Both points were right to challenge. Measured with `countTokens` (free) and `generateContent`
+on the production key:
+
+**Latency — there is no tens-of-seconds ingestion step.** A fresh file answers as soon as it
+reports ACTIVE, and the wait is the model's, not the file's:
+
+| question about a file uploaded seconds earlier | thinking | time | thinking tokens |
+|---|---|---|---|
+| PNG 384×384, one-word question | default | 10.1 s | 1450 |
+| same, asked again | default | 8.0 s | 1214 |
+| same, different question | default | 2.9 s | 341 |
+| same, one-word question | low | 1.1 s | 0 |
+| PDF 765 B (marker), first question | default | 1.5 s | 85 |
+| PDF 765 B, first question | low | 1.9 s | 0 |
+| PNG 384×384, first question | low | 4.8 s | 243 |
+
+Upload → ACTIVE takes ~2 s even for 7 MB, at any size tested. The original 35.3 s was not
+reproduced (the same PDF question answered in 1.5 s); one 503 "currently experiencing high
+demand" was caught mid-experiment and the router's retry handled it. The dominant controllable
+factor is the thinking budget: the default level spends 1200–1450 thinking tokens on a
+one-word question. The `analyze_file` description and `docs/06` now say this — the earlier
+"provider ingests the file" claim is retracted (the 0.18.1 edit to the description had
+silently missed its anchor; both files carry the corrected text now).
+
+**Token cost — set by `media_resolution`, not by bytes, and not by the 2.x tile rule.** The
+count sits at 1089 across 300×300…4096×4096 px and 2 KB…7 MB (1600×1200 measures 1064 — within
+2 %); two 1600×1200 JPEGs at 31 KB and 144 KB cost the same. The official per-image levels (Gemini 3 documents `media_resolution` low/medium/high
+per media part):
+
+| media | default | low | medium | high |
+|---|---|---|---|---|
+| image (all sizes tested) | 1089 (= high) | 256 | 529 | 1089 |
+| PDF page (1 page, text) | 560 (= medium) | 280 | 560 | 1120 |
+| PDF, 3 pages | 1680 (= 3 × 560) | 840 | — | — |
+
+The published "≤384 px → 258, else 768×768 tiles" rule describes Gemini 2.x; on Gemini 3 the
+per-image cost is flat per resolution level, and our requests currently take the default —
+so images ride the most expensive level (1089) while a `media_resolution=low` part would cost
+256. Also measured: the 1089-token figure holds for a 2 KB image and a 7 MB image alike, so
+byte size never predicts cost; `countTokens` and `usageMetadata` agree (1098 in vs 1089
+counted + prompt text).
+
+**Probe budget (operational, not a product fact):** the serving key is on the provider's free
+tier for `gemini-3.6-flash` — `GenerateRequestsPerDayPerProjectPerModel-FreeTier = 20` per
+day. These experiments consumed the day's remaining generative requests; the counting tables
+above cost nothing because `countTokens` draws no quota. Anything that spends should be
+planned against that number until more keys (each project has its own allowance) or a paid
+tier is in place.
+
 ## Cost notes kept for C2
 
-- Images cost a flat per-image amount regardless of pixels; audio is priced by duration.
-  Google's token economics for images are favourable enough that packing several small images
-  into one group request is cheap.
-- Counting is free (no RPD), so C2 plans packs by measurement, not by estimate. The published
-  per-page PDF guidance did not survive contact with reality — a one-page text PDF measured
-  **560** tokens — which is exactly why the packer takes `count_file_tokens` as its input and
-  never a per-page constant.
+- Per-image cost is flat per resolution level and byte-independent; the level is the lever:
+  a `media_resolution=low` image part costs 256 against the default 1089, and a PDF page 280
+  against 560. C2 decides the level per media type and sends it explicitly, instead of
+  inheriting the provider default.
+- Counting is free, so C2 plans packs by measurement — `count_file_tokens` is the input, and
+  a per-page constant is never assumed (the 560 figure above is measured for this model).

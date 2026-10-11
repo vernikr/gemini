@@ -56,6 +56,13 @@ and the evidence live in `report.md` in this folder — not repeated here.
   text is chunkable like any other body.
 - Per-group progress and per-group ledger rows, then the existing consolidation stage
   produces the single final answer.
+- **`media_resolution` is a packing input, not a leftover.** Measured (report §0.18.2):
+  images cost 1089 tokens at the default level, 529 at medium, 256 at low — flat per level,
+  independent of pixels and bytes; PDF pages 560 / 280 / 1120. The packer therefore plans
+  with the level the request will actually use, and the gateway must send the level per media
+  part instead of inheriting the provider default. Choosing the level per media type is a
+  policy call (low may lose small text in scans) that C2 states explicitly rather than
+  silently.
 - One PDF is never split. A file that alone exceeds the budget is refused with its measured
   cost, not truncated.
 

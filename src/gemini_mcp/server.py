@@ -297,7 +297,13 @@ def build_server(deps: Deps) -> MCPServer:
         - PDFs, images, audio and video go to the provider's Files API: one upload, one
           measured request (meta.file.tokens carries the measurement; the file is never
           split). A second analyze_file on the same upload_id reuses the uploaded file
-          until the provider expires it.
+          until the provider expires it — a repeat question is cheap and fast. Measured
+          on the production daemon: an upload reaches ACTIVE in ~2 s and a fresh file
+          answers in 2-5 s at thinking=low, ~10 s at the default thinking level; the time
+          is the model's (default thinking spends 1000+ thinking tokens on one-word
+          questions), not file handling. Never read a slow answer as a hang and never
+          resubmit: a generate call spends quota, while reusing the upload does not, and
+          count_file_tokens at the measured-tokens stage is free.
         - anything else fails fast with 'binary_file_needs_conversion', ZERO quota spent.
         A PDF over the pre-flight ceilings is refused the same way (pdf_too_large,
         pdf_too_many_pages). Same knobs and routes as analyze_large; the job runs as a

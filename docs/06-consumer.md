@@ -192,11 +192,14 @@ PDFs are never split into parts: one file is one request, and `meta.file.tokens`
 the measured cost. `ingest.pdf_max_mb` / `pdf_max_pages` mirror the provider's document
 ceilings — a file over them is refused before any upload, with the number that tripped.
 A second `analyze_file` on the same `upload_id` reuses the uploaded file (the reference
-lives in the inbox sidecar) until the provider expires it or the key changes. Reuse is also
-much faster: measured on the production daemon, the first request after an upload takes
-tens of seconds (the provider ingests the file even though it already reports ready) while
-the second answers in seconds — so a slow first answer is normal, and resubmitting only
-spends quota twice.
+lives in the inbox sidecar) until the provider expires it or the key changes — a repeat
+question is cheap and fast. Timing measured on the production daemon: the provider reports
+an upload ACTIVE in ~2 s, and a fresh file answers in 2–5 s at `thinking=low` and ~10 s at
+the default level — the bulk of the wait is the model (default thinking spends 1000+
+thinking tokens even on one-word questions), not file handling; the provider can also
+answer 503 under demand spikes, which the router retries. Never read a slow answer as a
+hang, and never resubmit: each generate call spends quota, while `count_file_tokens` — the
+step that produces `meta.file.tokens` — spends none.
 
 Per-upload cap: `ingest.max_file_mb`. For a text document it is a memory guard sized
 against the service's `MemoryMax` — the pipeline holds the extracted text in RAM while
