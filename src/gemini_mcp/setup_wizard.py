@@ -320,7 +320,9 @@ async def _probe_keys(keys: list[str]) -> list[dict]:
                                                  "state_path": ":memory:"}))
     out = []
     try:
-        avail = await router.availability()
+        # per-key on purpose: this is the one place where "does THIS key work" is the
+        # question, and routing's shared probe cannot answer it.
+        avail = await router.availability_per_key()
         for k in keys:
             models = avail.get(key_id(k))
             out.append({"key_id": key_id(k),

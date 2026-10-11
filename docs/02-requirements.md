@@ -33,10 +33,10 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 {
   "task": "instructions for the model (what to analyze/produce)",  // required
   "body": "the massive text",                    // required for analyze_large
-  "thinking_level": "low|medium|high",           // optional, default: high
+  "thinking_level": "low|medium|high",           // optional, default: medium
   "output_format": "text|json",                  // optional, default: text
   "max_output_tokens": 8192,                     // optional, per chunk & consolidation
-  "model": "gemini-3.7-flash",                   // optional pin; skips fallback chain
+  "model": "gemini-3.8-flash",                   // optional pin; skips fallback chain
   "overflow": "off|lite|lite+gemma",             // optional, default: off (hard stop)
   "wait_for_minute_limits": true,                // optional, default: true — wait out RPM/TPM gates (FR-C13)
   "chunk_tokens": 180000,                        // optional override of chunk_size_tokens
@@ -57,9 +57,9 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 
 ## C. Routing & quota (gemini-router)
 
-- **FR-C1** MUST route through the configured Flash chain (default
-  `3.8 → 3.7 → 3.6 → 3.5 → 3-flash-preview-slot`), skipping models that are unavailable
-  (`listModels` at startup, refreshed every `models_refresh_h`) or cooled down.
+- **FR-C1** MUST route through the configured Flash chain (newest first; deprecated
+  aliases excluded — see `config.py`), skipping models that are unavailable (`listModels`
+  at startup, refreshed every `models_refresh_h`) or cooled down.
 - **FR-C2** MUST enforce per **key×model**: RPD (PT-date counter + rolling-24h), RPM
   (sliding 60 s), TPM (sliding 60 s, tokens) — before dispatch (pre-flight) and
   after (accounting from `usageMetadata`).

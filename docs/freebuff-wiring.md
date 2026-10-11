@@ -125,7 +125,7 @@ candidate: pymupdf4llm). Inbox retention: `keep_hours` (default 24) +
 `total_cap_mb` (default 500), pruned on each ticket issuance.
 
 **Routes.** `route:"optimal"` (default) tries models in empirical
-availability order 3.6 → 3.5 → 3-preview → 3.8 → 3.7 (older = less loaded on the
+availability order (`routing.optimal_chain`: older models are less loaded on the
 free tier) and auto-overflows to flash-lite/gemma when Flash budgets run out.
 `route:"best_available"` is the legacy newest-first chain with opt-in overflow
 (hard stop). `thinking_level` default is `medium` (per-request override wins).

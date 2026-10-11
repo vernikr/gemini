@@ -207,8 +207,8 @@ npx -y @vernikr/gemini-mcp calls -n 20   # local audit tail
 ## 4. Free-tier facts & troubleshooting
 
 - Limits: 20 RPD / 5 RPM / 250k TPM **per key×model**; quota day resets at midnight
-  **America/Los_Angeles**; the chain `3.6 → 3.5 → 3-preview → 3.8 → 3.7-flash` walks
-  models automatically, `quota_exhausted` errors carry the reset ETA + overflow hint.
+  **America/Los_Angeles**; the chain (`routing.optimal_chain`)
+  walks models automatically, `quota_exhausted` errors carry the reset ETA + overflow hint.
 - Direct-mode counters are per-machine (local `state.db`): accurate across restarts and
   concurrent local clients, NOT shared with other machines — that's fleet mode's job.
 - `ETARGET`/404 right after a release: npm registry propagation takes ~2–4 min — retry.

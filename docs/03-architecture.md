@@ -221,7 +221,7 @@ headroom; `MemoryMax=350M` per unit guarantees external-service is never threate
 
 ```yaml
 router:
-  chain: [gemini-3.8-flash, gemini-3.7-flash, gemini-3.6-flash, gemini-3.5-flash, gemini-3-flash-preview]
+  chain: [gemini-3.8-flash, gemini-3.6-flash, gemini-3-flash-preview]   # 3.5/3.7 are deprecated aliases
   overflow_tiers: [gemini-3.5-flash-lite, gemma-auto]     # used only when request overflow != off
   limits_per_key_model: {rpd: 20, rpm: 5, tpm: 250000}
   limits_overrides: {gemini-3.5-flash-lite: {rpd: 500, rpm: 15}}

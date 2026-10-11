@@ -46,9 +46,11 @@ class RoutingCfg(BaseModel):
     availability order and auto-overflows to flash-lite/gemma; 'best_available'
     keeps the newest-first config chain with opt-in overflow (legacy semantics)."""
     default_route: str = "optimal"
+    # Empirical availability order: older models are less loaded on the free tier.
+    # Deprecated ids stay out — 3.5 and 3.7 are aliases now, so a call to them lands on
+    # 3.6 / 3.8 anyway, and counting it against the alias's own budget would be wrong.
     optimal_chain: list[str] = Field(default_factory=lambda: [
-        "gemini-3.6-flash", "gemini-3.5-flash", "gemini-3-flash-preview",
-        "gemini-3.8-flash", "gemini-3.7-flash"])
+        "gemini-3.6-flash", "gemini-3-flash-preview", "gemini-3.8-flash"])
 
 
 class IngestCfg(BaseModel):

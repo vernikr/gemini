@@ -32,11 +32,13 @@ from .tools import (
 INSTRUCTIONS = """\
 Gemini gateway for the Google AI Studio FREE tier (Flash models, ~20 requests/day
 each). Two routing profiles ('route' argument of the compute tools):
-- 'optimal' (default): models are tried in empirical availability order
-  3.6 → 3.5 → 3-preview → 3.8 → 3.7 (older = less loaded on the free tier);
-  overflow to flash-lite/gemma is AUTOMATIC when Flash budgets run out.
-- 'best_available': newest-first 3.8 → 3.7 → 3.6 → 3.5 → 3-preview; overflow is
-  strictly opt-in ('off' = HARD STOP on quota exhaustion).
+- 'optimal' (default): models are tried in empirical availability order, older first
+  (older models are less loaded on the free tier); overflow to flash-lite/gemma is
+  AUTOMATIC when Flash budgets run out.
+- 'best_available': newest-first chain; overflow is strictly opt-in ('off' = HARD STOP
+  on quota exhaustion).
+Do not pin 'model' unless the user asked for one — the chain exists to keep working
+when a model's budget or availability changes, and pinned ids go stale.
 Use analyze_large for massive bodies: it measures tokens, splits into overlapping
 chunks (each marked 'CHUNK N/M'), analyzes them, consolidates, and returns ONLY the
 compact result plus meta (models, spends, quota_after, progress_trace) — your context

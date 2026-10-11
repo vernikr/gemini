@@ -4,7 +4,7 @@ MCP gateway for **massive-payload Gemini analysis on the AI Studio free tier**.
 Runs on a small VPS; a local Freebuff Desktop agent sends huge bodies to it and gets back
 a compact consolidated result — the agent's own context stays clean.
 
-- Cascading Flash chain `3.8 → 3.7 → 3.6 → 3.5 → 3` via
+- Cascading Flash chain (newest first, deprecated aliases excluded) via
   [gemini-router](https://github.com/vernikr/gemini-router) (per key×model RPD/RPM/TPM
   ledger shared with `external-consumer`).
 - Over-limit bodies: split into overlapping chunks, each marked `[CHUNK N/M]`, analyzed
