@@ -44,3 +44,16 @@ explicitly pinned weak model is not an unexpected fallback. Other degraded outco
 (waits, retries, partial chunks, cost drift, split PDFs) get ⚠️; a failed tool call
 gets ⛔️ in the agent's reply, with a recovery hint. A clean run gets neither.
 The MCP server instructions carry the policy; the report encodes successful warnings.
+
+## Publication and live verification
+
+Gateway v0.24.0: full battery 198 pytest tests + ruff + secrets guard green;
+release jobs test/PyPI/npm/deploy/smoke green. Production daemon reports 0.24.0;
+qpdf 11.9 installed. Live `analyze_files` probe with a real 230-page PDF and a
+separate 1-page PDF: initial measured cost 257,600 tokens at `high` exceeded full
+250,000 TPM → split into pages 1–200 and 201–230 (TWO chunk requests), then
+consolidated that PDF to ONE answer before the other file was joined. The other
+file was alone in its group (`groups: [real.pdf]`), final `parts: 2`. The answer
+identified the repeated page text correctly. The `⚠️` report and live waiting
+countdown were visible. End-to-end 216.5s (provider quota waits/cooldowns and
+model calls dominated; this is NOT the cutting time). No source-file mixing.
