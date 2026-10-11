@@ -84,6 +84,30 @@ def test_add_accepts_a_key_that_needed_another_transport(pool, monkeypatch):
     assert rc == 0 and K2 in env_text(pool)
 
 
+def test_list_check_points_at_the_removal_command(pool, monkeypatch, capsys):
+    """The owner added a key, saw two dead ones still listed, and asked whether a removal
+    command exists. It did — the listing just never said so."""
+    monkeypatch.setattr(keys_cmd, "probe", lambda key, base=None: "rejected (HTTP 401)")
+    rc = run(["keys", "list", "--check", "--env-file", str(pool)])
+    out = capsys.readouterr().out
+    assert rc == 1
+    assert "1 rejected — remove: gemini-mcp keys remove" in out
+
+
+def test_list_check_json_reports_the_rejected_ones(pool, monkeypatch, capsys):
+    monkeypatch.setattr(keys_cmd, "probe", lambda key, base=None: "rejected (HTTP 401)")
+    run(["keys", "list", "--check", "--env-file", str(pool), "--json"])
+    body = json.loads(capsys.readouterr().out)
+    assert body["rejected"] == [keys_cmd.fingerprint(K1)]
+    assert body["keys"][0]["probe"].startswith("rejected")
+
+
+def test_plain_list_teaches_check_and_remove(pool, capsys):
+    rc = run(["keys", "list", "--env-file", str(pool)])
+    out = capsys.readouterr().out
+    assert rc == 0 and "--check" in out and "keys remove" in out
+
+
 def test_add_is_idempotent_and_never_duplicates(pool):
     run(["keys", "add", K2, "--env-file", str(pool), "--no-restart"])
     rc = run(["keys", "add", K1, K2, "--env-file", str(pool), "--no-restart", "--json"])

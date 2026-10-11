@@ -208,14 +208,25 @@ def run(args) -> int:
 
         if action == "list":
             rows = _pool_view(keys, getattr(args, "check", False))
+            rejected = [r for r in rows if "probe" in r and not r["probe"].startswith("ok")]
             report["keys"] = rows
+            report["rejected"] = [r["fingerprint"] for r in rejected]
             if as_json:
                 print(json.dumps(report, indent=1))
             else:
                 print(f"key pool: {path}  ({source})")
                 _print_rows(rows) if rows else print("  (empty — add one: gemini-mcp "
                                                      "keys add <key>)")
-            if rows and any(not r.get("probe", "ok").startswith("ok") for r in rows):
+                if rejected:
+                    # The command to drop them exists; a pool that lists the dead next to
+                    # the living should say so, or the operator goes looking for one
+                    # (owner, 2026-10-11 — added the key, asked where removal was).
+                    print(f"  {len(rejected)} rejected — remove: gemini-mcp keys remove "
+                          + " ".join(r["fingerprint"] for r in rejected))
+                elif rows and "probe" not in rows[0]:
+                    print("  next: gemini-mcp keys list --check probes each key (free)"
+                          " · gemini-mcp keys remove <n|fp> drops one")
+            if rejected:
                 return 1
             return 0
 
@@ -291,5 +302,6 @@ def run(args) -> int:
             if "restart" in report:
                 print(f"service: {report['restart']}"
                       + (f" · healthz: {report['healthz']}" if "healthz" in report else ""))
-            print("next: `gemini-mcp keys` lists the pool · `gemini-mcp doctor` checks keys")
+            print("next: `gemini-mcp keys` lists the pool · `gemini-mcp keys remove "
+                  "<n|fp>` drops a dead one · `gemini-mcp doctor` checks keys")
     return 0
