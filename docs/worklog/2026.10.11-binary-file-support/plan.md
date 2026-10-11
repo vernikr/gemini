@@ -21,7 +21,11 @@ the content cache. That is what "text can still be split" means in practice; the
 changed is PDFs, which no longer go anywhere near a local extractor. Poppler appears only
 as `pdfinfo`, for the page count the pre-flight needs, never for content.
 
-## Phase C1 — one file, one request (gateway half)
+## Phase C1 — one file, one request (gateway half) · **done 2026-10-11**
+
+Released as 0.18.0, hotfixed as 0.18.1 after the live probe caught a reporting bug
+(`rough_edges=1` on every run). What shipped, the measured facts from the production daemon
+and the evidence live in `report.md` in this folder — not repeated here.
 
 - `analyze_file` accepts the binary set and, for it: choose the serving key → upload with
   it → measure tokens (`count_file_tokens`) → one analysis request with the file reference
