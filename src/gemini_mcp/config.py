@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 from gemini_router import Config as RouterConfig
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class PipelineCfg(BaseModel):
@@ -54,6 +54,15 @@ class RoutingCfg(BaseModel):
 
 
 class IngestCfg(BaseModel):
+    @field_validator("media_resolution")
+    @classmethod
+    def _known_resolution(cls, v: str) -> str:
+        if v not in _RESOLUTIONS:
+            raise ValueError(f"ingest.media_resolution must be one of "
+                             f"{[r for r in _RESOLUTIONS if r]} or '' to inherit the "
+                             f"provider default (got {v!r})")
+        return v
+
     """File ingest (M4.5): inbox dir, caps, ticket TTL, retention (§10).
     M4.6: pandoc converts RTF/DOCX → GitHub-flavored Markdown server-side."""
     dir: str = "inbox"
@@ -75,6 +84,17 @@ class IngestCfg(BaseModel):
     files_api: bool = True
     pdf_max_mb: int = 50
     pdf_max_pages: int = 1000
+    # How hard the provider looks at the media — separately from the model's thinking
+    # level, and this is what sets the price: measured 2026-10-11, an image costs
+    # 256/529/1089 tokens and a PDF page 280/560/1120 at low/medium/high, flat per level.
+    # `high` is the owner's choice for this gateway (2026-10-11) — the per-image cost is
+    # small next to the free minute limits, and scans keep their small print. "" = inherit
+    # the provider default (images high, PDFs medium), which would price the two
+    # differently for no reason we chose.
+    media_resolution: str = "high"
+
+
+_RESOLUTIONS = ("", "low", "medium", "high")
 
 
 class AppCfg(BaseModel):

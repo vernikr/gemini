@@ -33,6 +33,7 @@ class FakeRouter:
         self.uploads: list[dict] = []
         self.file_counts: list[tuple] = []
         self.files_seen: list[list] = []
+        self.file_count_levels: list[str | None] = []
         self.file_tokens = file_tokens
         self.upload_error = upload_error
         self.expiry = expiry or self.EXPIRY
@@ -72,8 +73,10 @@ class FakeRouter:
                             expires_at=self.expiry, sha256=sha256 or "a" * 64,
                             key_id=key_id(self.KEY))
 
-    async def count_file_tokens(self, model, uri, mime, *, key_id=None) -> int:
+    async def count_file_tokens(self, model, uri, mime, *, key_id=None,
+                                media_resolution=None) -> int:
         self.file_counts.append((model, uri, mime))
+        self.file_count_levels.append(media_resolution)
         return self.file_tokens
 
     async def complete(self, req, on_event=None, files=None) -> RouterResult:

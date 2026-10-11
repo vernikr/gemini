@@ -250,3 +250,63 @@ def test_routing_noise_is_not_a_rough_edge():
     switched = {**clean, "progress_trace": clean["progress_trace"] + [
         {"stage": "router:switch", "message": "switch (reason: unavailable)"}]}
     assert "rough_edges=1" in _report(switched)
+
+
+# ------------------------------------------------------- media resolution (the price knob)
+async def test_the_chosen_level_reaches_both_the_count_and_the_request(tmp_path, monkeypatch):
+    """The level is what the provider charges for, so a level applied to the request but not
+    to the measurement (or vice versa) makes the TPM gate and the ledger disagree. The owner
+    chose `high` for this gateway (2026-10-11) — PDFs included, doubling their per-page cost
+    against the provider default; that call is pinned here so a silent regression is loud."""
+    router = FakeRouter()
+    deps = _deps(tmp_path, monkeypatch, router=router)
+    uid = await _uploaded(deps, "scan.pdf", PDF_BYTES)
+
+    emitter = ProgressEmitter(FakeCtx())
+    out = await analyze_file_tool(deps, emitter,
+                                  {"task": "summarize", "upload_id": uid})
+
+    assert router.file_count_levels == ["high"], "the count must use the level we send"
+    assert router.files_seen[0][0].media_resolution == "high", "the request must carry it"
+    assert out["meta"]["file"]["resolution"] == "high"
+    assert "high" in out["report"]          # the one-line summary the agent reads
+    stage = [e for e in emitter.trace if e["stage"] == "uploaded"][0]
+    assert "(high)" in stage["message"]     # and the progress line a watching human sees
+
+
+async def test_an_empty_level_inherits_the_provider_default(tmp_path, monkeypatch):
+    """'' is the escape hatch: no field on the part, provider decides (images high, PDFs
+    medium). Useful for comparing against a measured default, and it must not be a typo
+    trap — an unknown word is refused at config load."""
+    router = FakeRouter()
+    deps = _deps(tmp_path, monkeypatch, router=router, media_resolution="")
+    uid = await _uploaded(deps, "scan.pdf", PDF_BYTES)
+
+    out = await _analyze(deps, uid)
+
+    assert router.file_count_levels == [None]
+    assert router.files_seen[0][0].media_resolution is None
+    assert out["meta"]["file"]["resolution"] is None
+
+
+def test_a_typo_in_the_level_fails_at_config_load():
+    with pytest.raises(Exception) as e:
+        IngestCfg(media_resolution="hyper")
+    assert "media_resolution must be one of" in str(e.value)
+
+
+async def test_a_reused_provider_reference_also_carries_the_level(tmp_path, monkeypatch):
+    """The sidecar stores the provider file, not the level: a reference reused on the next
+    call must be told the level again, or the second call silently prices differently."""
+    router = FakeRouter()
+    deps = _deps(tmp_path, monkeypatch, router=router)
+    uid = await _uploaded(deps, "scan.pdf", PDF_BYTES)
+    await _analyze(deps, uid)
+    assert len(router.uploads) == 1
+
+    router.file_count_levels.clear()
+    await _analyze(deps, uid)
+
+    assert len(router.uploads) == 1, "the second call must reuse, not re-upload"
+    assert router.file_count_levels == ["high"]
+    assert router.files_seen[1][0].media_resolution == "high"

@@ -203,7 +203,13 @@ Pasting raw file contents into
 is unreadable for the model (non-ASCII text survives as hex escapes).
 
 PDFs are never split into parts: one file is one request, and `meta.file.tokens` carries
-the measured cost. `ingest.pdf_max_mb` / `pdf_max_pages` mirror the provider's document
+the measured cost. Media is processed at `ingest.media_resolution` — default `high` (the
+owner's call, 2026-10-11: the per-image cost is small next to the minute limits, and scans
+keep their small print). The level is the price: measured, an image costs 256/529/1089 tokens
+and a PDF page 280/560/1120 at low/medium/high, and the provider's own default differs per
+media type (images high, PDFs medium) — so `high` roughly doubles a PDF page against the
+default. Set `""` to inherit the provider default instead; `meta.file.resolution` reports
+what was used. `ingest.pdf_max_mb` / `pdf_max_pages` mirror the provider's document
 ceilings — a file over them is refused before any upload, with the number that tripped.
 A second `analyze_file` on the same `upload_id` reuses the uploaded file (the reference
 lives in the inbox sidecar) until the provider expires it or the key changes — a repeat

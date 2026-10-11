@@ -435,6 +435,9 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
     router, ovf, route = _apply_route(deps, params.get("route"), params.get("overflow"))
     model = params.get("model") or router.cfg.chain[0]
     up = _cached_upload(router, loaded)
+    level = getattr(deps.app_cfg.ingest, "media_resolution", "") or ""
+    if up is not None and level:
+        up = up.with_resolution(level)     # a reused reference needs the level just as much
     if up is None:
         await emitter.stage("uploading", 4,
                             f"{filename}: {loaded.nbytes} bytes → provider Files API "
@@ -450,16 +453,20 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
         await asyncio.to_thread(ingest.save_provider_ref, inbox, upload_id, {
             "name": up.name, "uri": up.uri, "mime": up.mime,
             "expires_at": up.expires_at, "key_id": up.key_id, "sha256": up.sha256})
+    if up.media_resolution is None and level:
+        up = up.with_resolution(level)     # fresh uploads get it here, after the upload
     try:
-        file_tokens = await router.count_file_tokens(model, up.uri, up.mime,
-                                                     key_id=up.key_id)
+        file_tokens = await router.count_file_tokens(
+            model, up.uri, up.mime, key_id=up.key_id,
+            media_resolution=up.media_resolution)   # same level the request will use
     except (RouterError, QuotaExhaustedError) as e:      # a measurement, never fatal
         deps.logger.warning("count_file_tokens failed (%s) — sending unmeasured", e)
         file_tokens = 0
     await emitter.stage("uploaded", 8,
                         f"provider file {up.name} ready"
                         + (f" · {file_tokens} tokens" if file_tokens else
-                           " · token count unavailable"))
+                           " · token count unavailable")
+                        + (f" ({up.media_resolution})" if up.media_resolution else ""))
     task = params["task"]
     # The TPM gate must include the file: the router refuses a request that carries
     # files without a measured estimate, and this is that measurement.
@@ -487,7 +494,8 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
             "thinking_level": req.thinking_level, "requests_spent": 0 if res.cached else 1,
             "progress_trace": emitter.trace,
             "file": {"filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
-                     "tokens": file_tokens, "extractor": loaded.extractor, "via": "files_api",
+                     "tokens": file_tokens, "resolution": up.media_resolution,
+                     "extractor": loaded.extractor, "via": "files_api",
                      "provider": {"name": up.name, "uri": up.uri,
                                   "expires_at": up.expires_at, "key_id": up.key_id}}}
     deps.audit.record({"ts": time.time(), "tool": "analyze_file", "upload_id": upload_id,
@@ -497,6 +505,7 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
                        "model": res.model, "cached": res.cached})
     report = (f"file={filename} ({loaded.nbytes} bytes"
               + (f", {file_tokens} tokens" if file_tokens else "")
+              + (f", {up.media_resolution}" if up.media_resolution else "")
               + f") via Files API · {_report(meta)}")
     return {"report": report, "result": res.text, "meta": meta}
 

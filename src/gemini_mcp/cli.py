@@ -9,6 +9,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from typing import NoReturn
 
 from gemini_router.cli import cmd_calls, cmd_doctor, cmd_quota
 from rich.console import Console
@@ -275,17 +276,74 @@ def _run_uninstall(args) -> int:
     return 2 if rep.get("error") else 0
 
 
+class _FriendlyParser(argparse.ArgumentParser):
+    """argparse's failures, made usable: the error line, a `did you mean` when a known
+    command or flag is one edit away, and the one command that lists everything. A CLI
+    whose vocabulary grows (setup, doctor, quota, keys, prune…) owes the person typing a
+    way back from a typo — the alternative is a wall of `choose from …`."""
+
+    def _known_words(self) -> list[str]:
+        """Every word the user could have meant: flags, subcommand names and the literal
+        choices of positional arguments (`keys list|add|remove`). Harvested from the parser
+        tree so a new subcommand is covered the moment it is registered."""
+        words: list[str] = []
+        for action in self._actions:
+            words += list(action.option_strings)
+            if isinstance(action, argparse._SubParsersAction):
+                for name, sub in action.choices.items():
+                    words.append(name)
+                    words += sub._known_words() if isinstance(sub, _FriendlyParser) else []
+            elif isinstance(action.choices, (list, tuple, dict)):
+                # the literal values a positional accepts (`keys list|add|remove`) — a typo
+                # there is as common as one in a command name
+                words += [c for c in action.choices if isinstance(c, str)]
+        return [w for w in words if w not in ("-h", "--help")]
+
+    def error(self, message: str) -> NoReturn:
+        import difflib
+        import re as _re
+
+        # argparse quotes invalid choices but leaves unrecognized flags bare
+        tokens = _re.findall(r"'([^']+)'", message) + _re.findall(r"--[A-Za-z][\w-]*", message)
+        known = self._known_words()
+        bare = {w.lstrip("-"): w for w in known}
+        hint = ""
+        for token in tokens:
+            close = difflib.get_close_matches(token.lstrip("-"), bare, n=1, cutoff=0.6)
+            if close:
+                hint = f"did you mean '{bare[close[0]]}'?"
+                break
+        self.print_usage(sys.stderr)
+        sys.stderr.write(f"gemini-mcp: error: {message}\n")
+        if hint:
+            sys.stderr.write(f"  {hint}\n")
+        sys.stderr.write("  run 'gemini-mcp --help' for the command list, "
+                         "'gemini-mcp <command> --help' for one command\n")
+        raise SystemExit(2)
+
+
 def main(argv: list[str] | None = None) -> int:
     _bootstrap_env()
-    ap = argparse.ArgumentParser(prog="gemini-mcp",
-                                 description="Gemini free-tier MCP gateway")
+    ap = _FriendlyParser(
+        prog="gemini-mcp",
+        description="Gemini free-tier MCP gateway — one key pool (or one server), shared "
+                    "quota, one ledger.",
+        epilog="""common commands:
+  gemini-mcp setup                 onboarding wizard (keys + client config)
+  gemini-mcp doctor                keys, chain, limits, live probe — the health check
+  gemini-mcp quota                 what is left, per key×model
+  gemini-mcp keys                  the key pool: fingerprints, where it lives
+  gemini-mcp keys add <key>        add a key: validated, probed free, service restarted
+  gemini-mcp analyze_file          (MCP tool) read a PDF/image/audio file
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="config.yaml path (or GEMINI_MCP_CONFIG)")
     ap.add_argument("--keys", help="API key(s), comma-separated (overrides every other "
                                    "source; visible in ps/history — prefer --keys-file)")
     ap.add_argument("--keys-file", help="file with key(s): comma/whitespace/newline "
                                         "separated, # comments ok (or GEMINI_MCP_KEYS_FILE)")
     ap.add_argument("--version", action="version", version=f"gemini-mcp {__version__}")
-    sub = ap.add_subparsers(dest="cmd", required=True)
+    sub = ap.add_subparsers(dest="cmd")
 
     p = sub.add_parser("setup", help="one-shot onboarding: keys+config in "
                                      "~/.config/gemini-mcp, client snippets")
@@ -353,6 +411,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--json", action="store_true")
 
     args = ap.parse_args(argv)
+    if not args.cmd:                              # bare invocation: show the way in
+        ap.print_help()
+        print("\nstart here: gemini-mcp setup — or gemini-mcp doctor if this machine is "
+              "already set up")
+        return 0
     if args.cmd in ("setup", "uninstall"):       # works even with a broken/absent config
         return _run_setup(args) if args.cmd == "setup" else _run_uninstall(args)
     if args.cmd == "keys":                       # file-level: never needs the app config

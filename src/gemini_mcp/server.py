@@ -296,7 +296,9 @@ def build_server(deps: Deps) -> MCPServer:
           extracted server-side and run the chunked analyze_large pipeline;
         - PDFs, images, audio and video go to the provider's Files API: one upload, one
           measured request (meta.file.tokens carries the measurement; the file is never
-          split). A second analyze_file on the same upload_id reuses the uploaded file
+          split). Media is read at ingest.media_resolution (default high; the level sets
+          the measured cost — meta.file.resolution reports it). A second analyze_file
+          on the same upload_id reuses the uploaded file
           until the provider expires it — a repeat question is cheap and fast. Measured
           on the production daemon: an upload reaches ACTIVE in ~2 s and a fresh file
           answers in 2-5 s at thinking=low, ~10 s at the default thinking level; the time
