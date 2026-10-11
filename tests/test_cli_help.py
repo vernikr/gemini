@@ -64,7 +64,8 @@ def test_the_guard_flags_a_real_shaped_key_and_accepts_marked_fakes(tmp_path):
     # built at runtime so the guard scanning THIS file stays happy (it is its own test)
     sample = "AIzaSy" + "Xk3vQpZ1mN8rT4bY6wL0cD2fG7hJ9sA5e"
     assert guard.scan_text(f'K = "{sample}"', "f") != []
-    assert guard.scan_text('K = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"', "f") == []   # split: no literal
+    split = 'K = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"'
+    assert guard.scan_text(split, "f") == []          # concatenation hides it from the scan
     gh = "ghp_" + "abcdefghijklmnopqrstuvwxyz012345"
     assert guard.scan_text(f"K = \"{gh}\"", "f") != []
     assert guard.scan_text('K = "AIzaSyDUMMYfake_for_tests_00000000"', "f") == []
