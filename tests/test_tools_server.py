@@ -120,7 +120,11 @@ async def test_server_registers_tools_with_expected_schema(tmp_path):
     ar = next(t for t in tools if t.name == "analyze_result")
     ar_schema = getattr(ar, "inputSchema", None) or ar.input_schema
     assert {"request_id", "wait_seconds"} <= set(ar_schema["properties"])
-    assert "Analyze a massive text body" in (getattr(al, "description", "") or "")
+    desc = getattr(al, "description", "") or ""
+    assert "Analyze a massive text body" in desc
+    # Tool help is in the agent's read path. Never hand it retired aliases as a chain.
+    assert "3.6→3.5" not in desc and "3.7" not in desc
+    assert "quota_status" in desc              # live source of model names/budgets
 
 
 async def test_call_tool_roundtrip(tmp_path):

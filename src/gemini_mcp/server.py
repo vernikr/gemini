@@ -176,10 +176,11 @@ def build_server(deps: Deps) -> MCPServer:
             overflow: weaker models when Flash quotas are exhausted:
                 'off' | 'lite' | 'lite+gemma'. On route 'optimal' it is
                 auto-upgraded to 'lite+gemma' unless you set it explicitly.
-            route: 'optimal' (default) — availability-ordered chain
-                3.6→3.5→3-preview→3.8→3.7 with automatic overflow; or
-                'best_available' — newest-first chain, overflow opt-in only
-                (hard stop on quota).
+            route: 'optimal' (default) — availability-ordered, currently available
+                models with automatic weaker-tier overflow; or 'best_available' —
+                configured newest-first chain, overflow opt-in only (hard stop on
+                quota). For live names/budgets call quota_status; do not pin a model
+                unless the user asked for one.
             wait_for_minute_limits: wait out RPM/TPM windows with a progress countdown
                 (default true); false → route to the next model instantly or return
                 wait ETAs in the error.
