@@ -10,6 +10,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 from gemini_router import RouterEvent
 
@@ -30,7 +32,25 @@ class ProgressEmitter:
         self.trace: list[dict] = []
         self.pct: float = 0.0
         self.live = live                     # shared with JobManager; None = inline run
+        self._span: tuple[float, float] | None = None
         self._tasks: set[asyncio.Task] = set()
+
+    @contextmanager
+    def progress_span(self, low: float, high: float) -> Iterator[None]:
+        """Map one subtask's 0–100 into a bounded portion of its parent job.
+
+        In a multi-file call, a child pipeline must not announce 100% while sibling
+        files and final consolidation remain. Nested spans restore their parent.
+        """
+        parent = self._span
+        if parent is not None:
+            a, b = parent
+            low, high = a + (b - a) * low / 100, a + (b - a) * high / 100
+        self._span = (low, high)
+        try:
+            yield
+        finally:
+            self._span = parent
 
     def _update_live(self, **fields) -> None:
         if self.live is None:
@@ -43,11 +63,17 @@ class ProgressEmitter:
     async def stage(self, name: str, pct: float | None = None,
                     message: str | None = None, **detail) -> None:
         if pct is not None:
-            self.pct = float(pct)
+            value = max(0.0, min(100.0, float(pct)))
+            if self._span is not None:
+                low, high = self._span
+                value = low + (high - low) * value / 100
+            self.pct = max(self.pct, value)  # a later stage cannot un-finish work
         msg = message or name
         self.trace.append({"stage": name, "pct": self.pct, "message": msg,
                            "detail": detail, "ts": time.time()})
-        self._update_live(phase=_GATEWAY_PHASE.get(name, name), pct=self.pct,
+        phase = ("file_complete" if name == "done" and self._span is not None else
+                 _GATEWAY_PHASE.get(name, name))
+        self._update_live(phase=phase, pct=self.pct,
                           stage_line=msg, wait_until=None)
         self.logger.info("[%3.0f%%] %s", self.pct, msg)
         if self.ctx is not None:

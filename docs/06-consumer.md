@@ -205,8 +205,11 @@ req=N · …s · clean run`) — the agent should relay it.
 The one-line `report` shows EVERY distinct model used; an unrequested flash-lite or
 gemma is shown as `⚠️ model-name` even if a stronger model made the final summary.
 Relay the ⚠️ and its reason for any retry, wait, incomplete chunk, split PDF, or cost
-drift. If the call failed entirely, prefix your explanation with ⛔️ and give the
-recovery step. Neither sign belongs on a clean run.
+drift. `rough_edges=N` counts distinct wait/retry/switch episodes, not failed
+requests; repeated countdown ticks are ONE wait. If the call failed entirely,
+prefix your explanation with ⛔️ and give the recovery step. Neither sign belongs
+on a clean run. Progress `pct` is approximate but never regresses or reaches
+100% before the whole job is finished.
 
 While a job runs, each `{status:'running'}` ticket carries `live`: the current phase
 (`generating`, `waiting_rpm`/`waiting_tpm`, `chunking`, `consolidating`, …), `eta_s`

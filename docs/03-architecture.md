@@ -160,7 +160,12 @@ overflow tiers if opted in.
 AND append to `progress_trace`. Percent budget: measure 5%, plan 5%, chunks 80% (i/M),
 consolidation 10% (per round). Note: MCP v2 deprecates the logging capability
 (SEP-2577) — `ctx.info` is still emitted for v1-compatible clients; the progress
-message channel is primary, the embedded trace is the floor.
+message channel is primary, the embedded trace is the floor. Multi-file calls
+map each child pipeline's 0–100 into a bounded span of the parent's progress;
+stages hold a monotone high-water mark. A child's `done` means `file_complete`,
+not whole-job completion. The report groups consecutive ticks of the same
+key/model/reason quota wait as one `rough_edges` episode, leaving the full trace
+unchanged for diagnostics.
 
 **Live status of a running job** (FR-E10): async tools (`wait_seconds` set) run as a
 background job keyed by `request_id`; `_jobbed` hands the job's emitter a plain dict

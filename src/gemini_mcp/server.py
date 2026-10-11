@@ -66,10 +66,11 @@ recovery step. Never mark a fully successful clean run as an error.
 
 REPORTING (required): every analyze_large/gemini_generate/analyze_file response
 starts with a one-line 'report' field: route · thinking level · final model ·
-requests spent · 'clean run' or rough_edges count. ALWAYS relay that line to the
-user in chat verbatim; if rough_edges > 0, say in plain words what happened
-(provider 503s and retries, model fallbacks, minute-limit waits with seconds,
-failed chunks — details are in meta.progress_trace). If the call errored, say so
+requests spent · 'clean run' or rough_edges count (distinct wait/retry/switch
+EPISODES, not a failed-request count). ALWAYS relay that line to the user in chat;
+if rough_edges > 0, say in plain words what happened (provider 503s and retries,
+model fallbacks, minute-limit waits with seconds, failed chunks — details are in
+meta.progress_trace). If the call errored, say so
 plainly with the reset ETA. Never silently swallow retries, waits or fallbacks.
 
 FILE INGEST: the flow is ticket → upload → analyze_file (the exact steps ride in the
@@ -124,7 +125,9 @@ def _tool_error_response(e: Exception) -> JSONResponse:
     try:
         payload = json.loads(raw)
     except json.JSONDecodeError:
-        return JSONResponse({"error": "tool_error", "detail": raw[:500]}, status_code=400)
+        return JSONResponse({"error": "tool_error", "detail": raw[:500],
+                             "agent_notice": "⛔️ Tell the user the tool failed."},
+                            status_code=400)
     code = payload.get("error") if isinstance(payload, dict) else None
     if isinstance(payload, dict):
         payload.setdefault("agent_notice", "⛔️ Tell the user the call failed and "
@@ -426,11 +429,13 @@ def build_server(deps: Deps) -> MCPServer:
             data = await request.json()
         except Exception:  # noqa: BLE001 — a non-JSON body is the client's error, not a 500
             return JSONResponse({"error": "bad_json",
-                                 "hint": "send a JSON object with at least 'prompt'"},
+                                 "hint": "send a JSON object with at least 'prompt'",
+                                 "agent_notice": "⛔️ Request failed; send valid JSON."},
                                 status_code=400)
         if not isinstance(data, dict) or not data.get("prompt"):
             return JSONResponse({"error": "missing_prompt",
-                                 "hint": "body must be {\"prompt\": \"…\", …}"},
+                                 "hint": "body must be {\"prompt\": \"…\", …}",
+                                 "agent_notice": "⛔️ Request failed; include a prompt."},
                                 status_code=400)
         try:
             out = await gemini_generate_tool(deps, ProgressEmitter(None, deps.logger), data)
@@ -438,7 +443,8 @@ def build_server(deps: Deps) -> MCPServer:
             return _tool_error_response(e)
         except Exception as e:  # noqa: BLE001 — never leak a traceback as text/plain
             deps.logger.exception("v1/complete failed")
-            return JSONResponse({"error": "internal", "detail": str(e)[:300]},
+            return JSONResponse({"error": "internal", "detail": str(e)[:300],
+                                 "agent_notice": "⛔️ Server failed; do not claim success."},
                                 status_code=500)
         return _json(out)
 

@@ -66,6 +66,32 @@ _ROUGH_STAGES = ("router:retry", "router:waiting", "router:switch", "router:paci
 _ROUGH_KEYS = ("retry", "503", "fallback", "failed", "cooldown", "overload", "timeout")
 
 
+def _rough_episodes(trace: list[dict]) -> list[dict]:
+    """Count events, not router poll ticks: one continuous minute wait is ONE wait.
+
+    A non-wait event ends an episode, so a second wait after a dispatch/retry is
+    counted independently. Keep the original trace intact for detailed diagnosis.
+    """
+    episodes: list[dict] = []
+    prior_wait: tuple | None = None
+    for event in trace:
+        stage = event.get("stage", "")
+        detail = event.get("detail") or {}
+        if stage == "router:waiting":
+            signature = (detail.get("model"), detail.get("key_id"),
+                         detail.get("reason"))
+            if signature != prior_wait:
+                episodes.append(event)
+            prior_wait = signature
+        else:
+            prior_wait = None
+            if stage in _ROUGH_STAGES or (not stage.startswith("router:") and
+                                           any(k in (event.get("message") or "").lower()
+                                               for k in _ROUGH_KEYS)):
+                episodes.append(event)
+    return episodes
+
+
 def _fallback_model(model: str | None) -> bool:
     return bool(model and ("flash-lite" in model.lower() or
                            "gemma" in model.lower()))
@@ -77,9 +103,7 @@ def _report(meta: dict) -> str:
     The host must be explicitly told which model(s) served the call, not just the
     final consolidation model (a strong final model can mask weaker partials).
     """
-    rough = [e for e in meta.get("progress_trace") or []
-             if e.get("stage") in _ROUGH_STAGES
-             or any(k in (e.get("message") or "").lower() for k in _ROUGH_KEYS)]
+    rough = _rough_episodes(meta.get("progress_trace") or [])
     models = list(dict.fromkeys(m for m in
                                 (meta.get("models_used") or [meta.get("model_final") or
                                                                 meta.get("model")]) if m))
@@ -99,8 +123,8 @@ def _report(meta: dict) -> str:
     if failed:
         parts.append(f"failed_chunks={failed}")
     if rough:
-        parts.append(f"rough_edges={len(rough)} (retries/waits/switches — details in "
-                     f"meta.progress_trace)")
+        parts.append(f"rough_edges={len(rough)} (distinct waits/retries/switches, "
+                     "NOT failed requests; details in meta.progress_trace)")
     if meta.get("degradations"):
         parts.append("; ".join(meta["degradations"]))
     if weak:
@@ -306,13 +330,16 @@ async def file_upload_ticket_tool(deps: Deps, filename: str, size_bytes: int,
     max_bytes = cfg.ingest.max_file_mb * 1_048_576
     if size_bytes <= 0:
         raise ToolError(json.dumps({"error": "bad_size",
-                                    "hint": "size_bytes must be > 0"}))
+                                    "hint": "size_bytes must be > 0",
+                                    "agent_notice": "⛔️ Upload ticket failed; fix the size."},
+                                   ensure_ascii=False))
     if size_bytes > max_bytes and not override_size_limit:
         raise ToolError(json.dumps({
             "error": "file_too_large", "bytes": size_bytes, "max_bytes": max_bytes,
+            "agent_notice": "⛔️ Upload ticket failed; explain the size limit and fix.",
             "fix": "compress the file locally, split it across separate requests, or "
                    "ask the user for explicit permission to exceed the cap and retry "
-                   "with override_size_limit=true"}))
+                   "with override_size_limit=true"}, ensure_ascii=False))
     token = os.environ.get("GEMINI_MCP_TOKEN", "")
     inbox = Path(cfg.ingest.dir)
     await asyncio.to_thread(ingest.prune, inbox, cfg.ingest.keep_hours,
@@ -826,7 +853,9 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
     group_spent = group_hits = 0
     models_used: list[str] = []
 
-    # -- text documents: each runs its own pipeline, exactly like the single-file path
+    # -- text documents: keep child progress below the parent job's completion
+    n_text = sum(ld.text is not None for _, ld in loadeds)
+    text_idx = 0
     for uid, loaded in loadeds:
         if loaded.text is None:
             continue
@@ -837,7 +866,10 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
         sub = {k: v for k, v in params.items() if k not in ("upload_ids", "upload_id")}
         sub["body"] = loaded.text
         sub["request_id"] = f"{rid}:t{part_no}" if rid else None
-        out = await analyze_large_tool(deps, emitter, sub)
+        with emitter.progress_span(15 + 10 * text_idx / n_text,
+                                   15 + 10 * (text_idx + 1) / n_text):
+            out = await analyze_large_tool(deps, emitter, sub)
+        text_idx += 1
         answers[part_no] = out["result"]
         m = out["meta"]
         text_spent += m.get("requests_spent", 0)
@@ -922,10 +954,13 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
                         "analyze them one at a time with analyze_file"},
                 ensure_ascii=False))
         # Refuse all non-splittable over-budget files BEFORE any split generation.
-        for it in oversized_pdfs:
-            out = await _analyze_split_pdf(
-                deps, emitter, params, it["loaded"], it["up"], it["tokens"],
-                router, ovf, route)
+        for split_idx, it in enumerate(oversized_pdfs):
+            with emitter.progress_span(
+                    35 + 40 * split_idx / len(oversized_pdfs),
+                    35 + 40 * (split_idx + 1) / len(oversized_pdfs)):
+                out = await _analyze_split_pdf(
+                    deps, emitter, params, it["loaded"], it["up"], it["tokens"],
+                    router, ovf, route)
             part_no += 1
             answers[part_no] = out["result"]  # ONE per-file answer in final merge
             models_used += out["meta"]["models_used"]
@@ -933,14 +968,13 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
             split_hits += out["meta"]["cache_hits"]
             files_meta.append({"upload_id": it["upload_id"], **out["meta"]["file"]})
         k = len(packs)
-        n_text = sum(1 for _, ld in loadeds if ld.text is not None)
-        await emitter.stage("packed", 45,
+        await emitter.stage("packed", 75,
                             f"{len(bins)} binaries → {k} group request(s), "
                             f"{n_text} text doc(s)")
         for gi, pack in enumerate(packs, 1):
             names = ", ".join(it["filename"] for it in pack)
             toks = sum(it["tokens"] for it in pack)
-            await emitter.stage("group", 45 + 40 * gi // max(1, k),
+            await emitter.stage("group", 75 + 15 * gi / max(1, k),
                                 f"group {gi}/{k}: {len(pack)} file(s), {toks} tokens")
             req = RouterRequest(
                 prompt=group_prompt(task, gi, k, names), thinking_level=thinking,

@@ -234,9 +234,11 @@ async def test_rest_complete_maps_errors_to_their_own_status(tmp_path):
         assert r.status_code == 400
         assert r.json()["error"] == "raw_document_inlined"      # object, not a string
         assert "analyze_file" in r.json()["fix"]
+        assert "⛔️" in r.json()["agent_notice"]
 
         r = await c.post("/v1/complete", headers=hdr, json={})
         assert r.status_code == 400 and r.json()["error"] == "missing_prompt"
+        assert "⛔️" in r.json()["agent_notice"]
 
         r = await c.post("/v1/complete",
                          headers={**hdr, "content-type": "application/json"},

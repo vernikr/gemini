@@ -125,6 +125,9 @@ async def test_group_split_parts_never_mix_other_files(tmp_path, monkeypatch):
     assert out["meta"]["files"][0]["split"]["chunks"] == 4
     assert out["meta"]["requests_spent"] == 7
     assert out["meta"]["parts"] == 2
+    trace = out["meta"]["progress_trace"]
+    assert [e["pct"] for e in trace] == sorted(e["pct"] for e in trace)
+    assert all(e["pct"] < 100 for e in trace[:-1])
 
 
 def test_report_badges_every_unrequested_lite_or_gemma_model():

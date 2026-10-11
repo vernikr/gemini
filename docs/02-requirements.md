@@ -212,6 +212,11 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   gate is being waited out (counts down on every poll), `pct`, `model`, `key_id`,
   `attempt` and the latest stage line. Polling surface only — no subscription, no extra
   tool, and a poll never blocks longer than `wait_seconds`.
+- **FR-E11** Job progress reported to an agent MUST not move backwards or claim
+  100% while a child file still has siblings or group consolidation pending.
+  Repeated ticks of one uninterrupted quota wait count as ONE warning episode,
+  while the detailed event trace stays intact. Agent-visible errors (including
+  direct upload-ticket and REST failures) carry an ⛔️ recovery cue.
 
 ## F. Non-functional
 
