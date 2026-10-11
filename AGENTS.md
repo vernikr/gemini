@@ -36,6 +36,9 @@ functional changes, blockers in `docs/blockers/`). Repo-specific rules:
 - Every FR-x from `docs/02` maps to a test; keep the mapping in test docstrings.
 
 ## Docs
+- Worklog lives in the repo that owns the change (placement rule mirrored in
+  gemini-router): a cross-repo feature splits into a capability plan there and a
+  product plan here, each stating its half once.
 - No counters in evergreen docs: no version numbers, dates, test counts or "N green"
   claims. They go stale silently and each one is a fact somebody must guard. Keep only
   what a reader cannot get from `pyproject.toml`, `--version` or `pytest`.
