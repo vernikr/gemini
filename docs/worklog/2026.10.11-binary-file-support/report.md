@@ -2,7 +2,7 @@
 
 Released as **gemini-mcp 0.18.0**, hotfixed as **0.18.1**. The library half — the capability
 and its interface — is gemini-router 0.1.12, recorded in
-`vernikr/gemini-router → docs/worklog/2026.10.11-binary-file-support/report.md`.
+`vernikr/gemini-router → docs/worklog/archive/2026.10.11-binary-file-support/report.md`.
 
 C2 (groups of files packed by measured tokens) is **not** in this report; it stays open in the
 plan in this folder.

@@ -6,7 +6,7 @@ text and a page mixes text with images anyway. Do not overcomplicate the backend
 reader is better.
 
 The router's half — the capability and its interface — lives in
-`vernikr/gemini-router → docs/worklog/2026.10.11-binary-file-support/plan.md` and is stated
+`vernikr/gemini-router → docs/worklog/archive/2026.10.11-binary-file-support/plan.md` and is stated
 there once. This file is the product half: what the gateway does with it.
 
 ## Routing rule inside the file flow
