@@ -279,18 +279,27 @@ Flow:
    `scp_path = root@<vps>:/opt/apps/gemini-mcp/inbox/<id>`.
 2. Agent uploads the bytes — either channel (Freebuff has a shell):
    - HTTP `PUT` to `upload_url` through the SSH tunnel (`ssh -N -L 8790:127.0.0.1:8790
-     root@<vps>`): the signature IS the auth (route exempt from bearer), one-time,
-     15-min expiry, size cap;
-   - `scp <file> <scp_path>`: no tunnel needed, the SSH key is the auth.
+     root@<vps>`): the signature IS the auth (route exempt from bearer), 15-min expiry,
+     size cap, ONE use. The route claims `inbox/<id>.consumed` with `O_EXCL` before the
+     body is buffered (a spent 20 MB PUT must not enter the memory budget), and the
+     marker outlives the blob, so a replay inside the TTL is refused even once the file
+     is pruned or evicted. The blob-exists check stays as the second line — it is what
+     names the useful next call (`already_uploaded` → `analyze_file`);
+   - `scp <file> <scp_path>`: no tunnel needed, the SSH key is the auth; nothing claims
+     the ticket, and the blob itself blocks a later PUT of it.
    Server writes `inbox/<id>.part` → atomic rename → `chmod 600`.
 3. MCP tool `analyze_file(task, upload_id, …same knobs as analyze_large…)`: server
    loads the blob, decodes utf-8→latin-1, runs a binary sniff (NUL bytes /
    non-text ratio) → non-text fails fast with `binary_file_needs_conversion`
    (ZERO RPD spend), else the existing pipeline chunks/consolidates it.
    `meta.file = {filename, bytes, chars, encoding}`.
-4. Retention: inbox purged after analysis by default (`keep_hours` config),
-   `max_file_mb` cap, total-inbox cap; cleanup piggybacks the existing retention
-   prune (§5). The per-file cap is a memory guard, not a policy — the pipeline holds
+4. Retention (FR-E9): blobs, sidecars and spent-ticket markers age out at `keep_hours`,
+   the total is capped by `total_cap_mb` (oldest first); prune runs on ticket issuance,
+   at the start of every `analyze_file` and on demand via `gemini-mcp prune`, so an
+   inbox nobody asks tickets from still empties. A blob that has been analyzed stays
+   until `keep_hours` — re-analyzing the same `upload_id` is a supported second call,
+   and the spent ticket cannot be replayed regardless. The per-file cap is a memory
+   guard, not a policy — the pipeline holds
    the extracted text in RAM while chunking, so it is sized against `MemoryMax`
    rather than against what the provider would accept. `ingest.allow_oversize` lets
    the owner lift it; while it is on, an agent may issue an oversized ticket with

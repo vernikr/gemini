@@ -1,4 +1,4 @@
-"""File ingest (M4.5, docs/03-architecture.md §9): HMAC one-time upload tickets,
+"""File ingest (M4.5, docs/03-architecture.md §10): HMAC one-time upload tickets,
 atomic inbox storage, text sniffing (binary fail-fast, ZERO quota spend), a minimal
 server-side RTF→text extractor (D11: the client stays maximally light) and retention
 pruning. Upload channels: HTTP PUT to a signed /v1/upload/<id> (signature IS the
@@ -62,13 +62,45 @@ def reserve(inbox: Path, upload_id: str, filename: str, size: int) -> None:
         encoding="utf-8")
 
 
+def claim_path(inbox: Path, upload_id: str) -> Path:
+    return inbox / f"{upload_id}.consumed"
+
+
+def ticket_spent(inbox: Path, upload_id: str) -> bool:
+    return claim_path(inbox, upload_id).exists()
+
+
+def ticket_consumed_error(upload_id: str) -> IngestError:
+    """One wording for both refusal points: the route's cheap pre-check and the
+    authoritative claim."""
+    return IngestError("ticket_consumed", upload_id=upload_id,
+                       hint="one-time ticket already spent — if the bytes landed, call "
+                            "analyze_file; otherwise issue a fresh file_upload_ticket")
+
+
+def claim_ticket(inbox: Path, upload_id: str) -> None:
+    """Spend the ticket, exactly once. O_EXCL is the guarantee: atomic between
+    concurrent PUTs, and the marker outlives the blob — so a replay inside the TTL is
+    refused even once the file is gone (prune, cap eviction, manual cleanup)."""
+    inbox.mkdir(parents=True, exist_ok=True)
+    try:
+        fd = os.open(claim_path(inbox, upload_id),
+                     os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        raise ticket_consumed_error(upload_id) from None
+    os.write(fd, f"{time.time():.0f}\n".encode())
+    os.close(fd)
+
+
 def save_upload(inbox: Path, upload_id: str, data: bytes, max_bytes: int) -> Path:
     if len(data) > max_bytes:
         raise IngestError("file_too_large", bytes=len(data), max_bytes=max_bytes)
     if (inbox / upload_id).exists():
         raise IngestError("already_uploaded", upload_id=upload_id,
                           hint="one-time ticket: file exists, call analyze_file")
-    inbox.mkdir(parents=True, exist_ok=True)
+    # Spent BEFORE the bytes land: a crash between the claim and the write costs a
+    # re-issued ticket, never a replay window.
+    claim_ticket(inbox, upload_id)
     part = inbox / f"{upload_id}.part"
     part.write_bytes(data)
     final = inbox / upload_id
@@ -85,28 +117,48 @@ def load_sidecar(inbox: Path, upload_id: str) -> dict:
     return json.loads(p.read_text(encoding="utf-8"))
 
 
+def _drop(inbox: Path, name: str) -> None:
+    """A blob and everything belonging to its ticket (sidecar, spent marker): past
+    keep_hours the claim is many TTLs old, so forgetting it is safe."""
+    for p in (inbox / name, sidecar_path(inbox, name), claim_path(inbox, name)):
+        p.unlink(missing_ok=True)
+
+
+def _evict(inbox: Path, name: str) -> None:
+    """Cap eviction: the bytes go, the spent marker STAYS — evicting the oldest blob
+    must not reopen a replay window for a ticket still inside its TTL."""
+    for p in (inbox / name, sidecar_path(inbox, name)):
+        p.unlink(missing_ok=True)
+
+
 def prune(inbox: Path, keep_hours: float, total_cap_mb: float) -> int:
-    """Drop blobs+sidecars older than keep_hours; then oldest-first until the total
-    fits the cap. Returns count removed. Piggybacked on ticket issuance."""
+    """Drop blobs older than keep_hours; then oldest-first until the total fits the
+    cap. Returns count removed. Triggers: ticket issuance, a completed analyze_file
+    and `gemini-mcp prune` — an inbox nobody asks tickets from still ages out."""
     if not inbox.exists():
         return 0
     now = time.time()
+    older_than = now - keep_hours * 3600
     removed = 0
-    blobs = [p for p in inbox.iterdir() if p.is_file() and not p.suffix
-             and not p.name.endswith(".part")]
+    blobs = [p for p in inbox.iterdir() if p.is_file() and not p.suffix]
     for p in list(blobs):
-        if now - p.stat().st_mtime > keep_hours * 3600:
-            sidecar_path(inbox, p.name).unlink(missing_ok=True)
-            p.unlink(missing_ok=True)
+        if p.stat().st_mtime < older_than:
+            _drop(inbox, p.name)
             blobs.remove(p)
             removed += 1
+    # Markers, sidecars and half-written parts outlive their blob only when it was
+    # removed outside prune; they age out on the same clock. The ticket TTL is orders
+    # of magnitude below keep_hours, so nothing replayable is discarded here.
+    for p in inbox.iterdir():
+        if p.suffix in (".json", ".consumed", ".part") \
+                and p.stat().st_mtime < older_than:
+            p.unlink(missing_ok=True)
     total = sum(p.stat().st_size for p in blobs)
     for p in sorted(blobs, key=lambda q: q.stat().st_mtime):   # oldest first
         if total <= total_cap_mb * 1_048_576:
             break
         total -= p.stat().st_size
-        sidecar_path(inbox, p.name).unlink(missing_ok=True)
-        p.unlink(missing_ok=True)
+        _evict(inbox, p.name)
         removed += 1
     return removed
 

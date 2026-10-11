@@ -1,6 +1,6 @@
-"""M4.5 file ingest: HMAC tickets (expiry/tamper/one-time), atomic inbox store,
+"""M4.5 file ingest: HMAC tickets (expiry/tamper/one-use), atomic inbox store,
 binary fail-fast with ZERO spend, server-side RTF extraction, analyze_file E2E,
-bearer-exempt upload route. No network (b01)."""
+bearer-exempt upload route, three prune triggers. No network (b01)."""
 from __future__ import annotations
 
 import json
@@ -8,6 +8,7 @@ import logging
 import os
 import time
 from pathlib import Path
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import httpx
@@ -15,7 +16,7 @@ import pytest
 from mcp.server.mcpserver.exceptions import ToolError
 
 from conftest import FakeCtx, FakeRouter, make_app_cfg, make_deps
-from gemini_mcp import ingest
+from gemini_mcp import cli, ingest
 from gemini_mcp.config import IngestCfg
 from gemini_mcp.progress import ProgressEmitter
 from gemini_mcp.server import build_http_app, build_server
@@ -109,6 +110,37 @@ def test_prune_removes_old(tmp_path):
     assert not (inbox / "aaa").exists() and (inbox / "bbb").exists()
 
 
+def test_prune_clears_spent_markers_and_orphan_parts(tmp_path):
+    """FR-E9: markers, sidecars and half-written parts outlive their blob when it was
+    removed outside prune; the inbox must not accumulate them forever."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    for name in ("a.consumed", "a.json", "b.part"):
+        p = inbox / name
+        p.write_text("x")
+        os.utime(p, (0, 0))
+    live = inbox / "c.consumed"                 # young: belongs to an open ticket
+    live.write_text("x")
+    assert ingest.prune(inbox, keep_hours=1, total_cap_mb=10) == 0
+    for name in ("a.consumed", "a.json", "b.part"):
+        assert not (inbox / name).exists()
+    assert live.exists()
+
+
+def test_spent_ticket_is_refused_without_the_blob(tmp_path):
+    """FR-E9: the one-time guarantee is the ticket, not the file — after the claim the
+    same ticket is refused even once the blob is gone (prune, eviction, cleanup)."""
+    inbox = tmp_path / "inbox"
+    ingest.reserve(inbox, "u1", "a.txt", 3)
+    ingest.save_upload(inbox, "u1", b"abc", 99)
+    assert ingest.ticket_spent(inbox, "u1")
+    (inbox / "u1").unlink()
+    with pytest.raises(ingest.IngestError) as e:
+        ingest.save_upload(inbox, "u1", b"abc", 99)
+    assert e.value.payload["error"] == "ticket_consumed"
+    assert not (inbox / "u1").exists()          # the refused replay wrote nothing
+
+
 async def test_upload_route_one_time_and_analyze_file(tmp_path, monkeypatch):
     deps = _deps(tmp_path, monkeypatch)
     ticket = await file_upload_ticket_tool(deps, "note.txt", 11)
@@ -122,7 +154,7 @@ async def test_upload_route_one_time_and_analyze_file(tmp_path, monkeypatch):
         r = await c.put(f"{u.path}?{u.query}", content=b"hello world")  # no bearer
         assert r.status_code == 200 and r.json()["bytes"] == 11
         r2 = await c.put(f"{u.path}?{u.query}", content=b"hello world")
-        assert r2.status_code == 409                       # one-time
+        assert r2.status_code == 409 and r2.json()["error"] == "ticket_consumed"
         q3 = u.query.rsplit("sig=", 1)[0] + "sig=deadbeef"
         r3 = await c.put(f"{u.path}?{q3}", content=b"x")
         assert r3.status_code == 400                       # tampered sig
@@ -133,6 +165,56 @@ async def test_upload_route_one_time_and_analyze_file(tmp_path, monkeypatch):
     assert out["meta"]["file"]["extractor"] == "plain"
     assert out["report"].startswith("file=note.txt")
     assert "route=optimal" in out["report"] and "clean run" in out["report"]
+
+
+def test_cap_eviction_keeps_the_spent_marker(tmp_path):
+    """Evicting a blob to stay under the total cap must not hand its ticket back: the
+    claim is what refuses the replay, and it outlives the bytes."""
+    inbox = tmp_path / "inbox"
+    ingest.reserve(inbox, "blob", "a.txt", 3)
+    ingest.save_upload(inbox, "blob", b"x" * 4096, 99_999)
+    assert ingest.prune(inbox, keep_hours=24, total_cap_mb=0.001) == 1   # 1 KB cap
+    assert not (inbox / "blob").exists()
+    assert ingest.ticket_spent(inbox, "blob")
+    with pytest.raises(ingest.IngestError) as e:
+        ingest.save_upload(inbox, "blob", b"x", 99_999)
+    assert e.value.payload["error"] == "ticket_consumed"
+
+
+async def test_route_refuses_a_replayed_ticket_without_the_blob(tmp_path, monkeypatch):
+    """FR-E9, route level. The replay window used to be the whole TTL: with the blob
+    gone (prune, cap eviction, manual cleanup) the signed URL was accepted again."""
+    deps = _deps(tmp_path, monkeypatch)
+    ticket = await file_upload_ticket_tool(deps, "note.txt", 11)
+    srv = build_server(deps)
+    app = build_http_app(srv, deps.app_cfg, TOKEN)
+    u = urlsplit(ticket["upload_url"])
+    inbox = Path(deps.app_cfg.ingest.dir)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                 base_url="http://test") as c:
+        r = await c.put(f"{u.path}?{u.query}", content=b"hello world")
+        assert r.status_code == 200
+        (inbox / ticket["upload_id"]).unlink()
+        r2 = await c.put(f"{u.path}?{u.query}", content=b"other bytes")
+    assert r2.status_code == 409 and r2.json()["error"] == "ticket_consumed"
+    assert not (inbox / ticket["upload_id"]).exists()
+
+
+async def test_analyze_file_prunes_a_stale_inbox(tmp_path, monkeypatch):
+    """FR-E9 second prune trigger: before it, files outlived their retention unless
+    the client happened to request another ticket."""
+    deps = _deps(tmp_path, monkeypatch)
+    inbox = Path(deps.app_cfg.ingest.dir)
+    ticket = await file_upload_ticket_tool(deps, "note.txt", 5)
+    ingest.save_upload(inbox, ticket["upload_id"], b"hello", 99)
+    stale = [inbox / n for n in ("old-blob", "old-blob.json", "old-blob.consumed")]
+    for p in stale:
+        p.write_text("x")
+        os.utime(p, (0, 0))
+    out = await analyze_file_tool(deps, ProgressEmitter(FakeCtx()),
+                                  {"task": "t", "upload_id": ticket["upload_id"]})
+    assert out["result"].startswith("SINGLE[")
+    assert not any(p.exists() for p in stale)
 
 
 async def test_binary_fail_fast_zero_spend(tmp_path, monkeypatch):
@@ -219,6 +301,25 @@ async def test_oversize_only_needs_the_callers_word_and_leaves_a_record(tmp_path
                                  base_url="http://test") as c:
         r2 = await c.put(f"{u2.path}?{u2.query}", content=b"q" * (3 * 1_048_576))
     assert r2.status_code == 413 and r2.json()["error"] == "file_too_large"
+
+
+def test_cli_prune_also_empties_the_inbox(monkeypatch, tmp_path, capsys):
+    """FR-E9 third prune trigger: `prune` covered logs and audit rows while the inbox
+    — the one place files accumulate — waited for a ticket that might never come."""
+    inbox = tmp_path / "inbox"
+    inbox.mkdir()
+    (inbox / "blob").write_bytes(b"x")
+    os.utime(inbox / "blob", (0, 0))
+    cfg = make_app_cfg(tmp_path / "logs").model_copy(
+        update={"ingest": IngestCfg(dir=str(inbox))})
+    monkeypatch.setattr(cli, "prune_jsonl", lambda lcfg, dry: 0)
+    monkeypatch.setattr(cli, "make_routers", lambda a, r: (
+        SimpleNamespace(ledger=SimpleNamespace(prune=lambda **k: {})), None, "direct"))
+    monkeypatch.setattr(cli, "enforce_audit_size", lambda *a: {})
+    assert cli._run_prune(cfg, SimpleNamespace(cache_ttl_h=24),
+                          SimpleNamespace(audit_days=None, dry=False)) == 0
+    assert json.loads(capsys.readouterr().err)["inbox_removed"] == 1
+    assert not (inbox / "blob").exists()
 
 
 def test_default_cap_is_twenty_megabytes():

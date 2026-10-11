@@ -295,6 +295,11 @@ async def analyze_file_tool(deps: Deps, emitter: ProgressEmitter, params: dict) 
     cfgi = deps.app_cfg.ingest
     inbox = Path(cfgi.dir)
     upload_id = params["upload_id"]
+    # Second prune trigger (the first is ticket issuance): a session that analyzes and
+    # stops — never asking for another ticket — still ages its inbox out, spent-ticket
+    # markers included. Runs before the blob is read, so a fresh upload is never the
+    # oldest entry the cap evicts.
+    await asyncio.to_thread(ingest.prune, inbox, cfgi.keep_hours, cfgi.total_cap_mb)
     try:
         side, nbytes, text, enc, extractor = await asyncio.to_thread(
             _load_and_extract, inbox, upload_id, cfgi)

@@ -54,7 +54,7 @@ class RoutingCfg(BaseModel):
 
 
 class IngestCfg(BaseModel):
-    """File ingest (M4.5): inbox dir, caps, ticket TTL, retention (§9).
+    """File ingest (M4.5): inbox dir, caps, ticket TTL, retention (§10).
     M4.6: pandoc converts RTF/DOCX → GitHub-flavored Markdown server-side."""
     dir: str = "inbox"
     # 20 MB keeps a single job inside the service's memory allowance. The gateway

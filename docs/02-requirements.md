@@ -149,6 +149,12 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   server state without stopping the daemon.
 - **FR-E8** Secrets: API keys and bearer token MUST never appear in any log/audit/error
   (masked `key_id`, token redacted); bodies are not logged by default.
+- **FR-E9** File inbox (M4.5): upload tickets are HMAC-signed, size-bound, TTL-bound and
+  spent on FIRST use — the claim is an `O_EXCL` marker that outlives the blob, so a
+  replay inside the TTL is refused even after the file is pruned or evicted. Blobs,
+  sidecars and spent markers age out at `ingest.keep_hours`, capped by
+  `ingest.total_cap_mb` (oldest first), pruned when a ticket is issued, at the start of
+  every `analyze_file` and on demand via `gemini-mcp prune`.
 
 ## F. Non-functional
 

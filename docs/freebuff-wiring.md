@@ -122,7 +122,10 @@ pandoc is ever missing, RTF falls back to the built-in plain-text extractor
 (cp1251 `\'xx` runs, `\uNNNN`, junk groups skipped). Binaries (pdf/zip) fail fast
 with `binary_file_needs_conversion` and ZERO quota spent (PDF converter deferred —
 candidate: pymupdf4llm). Inbox retention: `keep_hours` (default 24) +
-`total_cap_mb` (default 500), pruned on each ticket issuance.
+`total_cap_mb` (default 500); pruned on each ticket issuance, at the start of every
+`analyze_file` and by `gemini-mcp prune`. An upload ticket is spent by its first PUT
+(the blob survives a replay, the spent marker is what refuses it), so a failed upload
+means a fresh ticket, never a retry of the old URL.
 
 **Routes.** `route:"optimal"` (default) tries models in empirical
 availability order (`routing.optimal_chain`: older models are less loaded on the

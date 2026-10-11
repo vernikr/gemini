@@ -300,8 +300,10 @@ async def test_upload_enforces_the_ticket_size(tmp_path, monkeypatch):
         assert r.status_code == 200 and r.json()["bytes"] == 1024
         assert (inbox / "u3").read_bytes() == b"y" * 1024
 
+    # every accepted upload left its spent-ticket marker; u2 and u4 were refused
+    # before anything was written, so they spent nothing
     stored = {p.name for p in inbox.iterdir()}
-    assert stored == {"u1", "u3"}
+    assert stored == {"u1", "u1.consumed", "u3", "u3.consumed"}
 
 
 async def test_the_file_flow_is_stated_once(tmp_path):

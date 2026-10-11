@@ -96,6 +96,7 @@ _TOOL_ERROR_STATUS = {"quota_exhausted": 429, "plan_budget_insufficient": 429,
                       "upload_not_found": 404,
                       "binary_file_needs_conversion": 415, "conversion_unavailable": 415,
                       "ticket_expired": 410, "already_uploaded": 409,
+                      "ticket_consumed": 409,
                       "bad_signature": 403, "ingest_disabled": 503}
 
 
@@ -367,17 +368,22 @@ def build_server(deps: Deps) -> MCPServer:
 
     @srv.custom_route("/v1/upload/{upload_id}", methods=["PUT", "POST"])
     async def upload(request: Request) -> JSONResponse:
-        """Presigned one-time upload (M4.5 §9): the HMAC signature in the query IS
-        the auth (bearer-exempt); size-bound, TTL-bound, single use."""
-        from .ingest import IngestError, save_upload, verify_ticket
+        """Presigned one-time upload (M4.5 §10): the HMAC signature in the query IS
+        the auth (bearer-exempt); size-bound, TTL-bound, spent on first use."""
+        from . import ingest
 
         cfgi = deps.app_cfg.ingest
         token = os.environ.get("GEMINI_MCP_TOKEN", "")
         q = request.query_params
         uid = request.path_params.get("upload_id", "")
         try:
-            verify_ticket(token, uid, q.get("exp", ""), q.get("size", ""),
-                          q.get("sig", ""))
+            ingest.verify_ticket(token, uid, q.get("exp", ""), q.get("size", ""),
+                                 q.get("sig", ""))
+            # Cheap refusal of a replayed ticket BEFORE the body is buffered: the
+            # authoritative check is the O_EXCL claim inside save_upload, this one
+            # only keeps a spent 20 MB PUT out of the memory budget.
+            if ingest.ticket_spent(Path(cfgi.dir), uid):
+                raise ingest.ticket_consumed_error(uid)
             limit = cfgi.max_file_mb * 1_048_576
             # The signed ticket is the authority on size: the ticket tool refuses
             # anything over the cap unless the caller overrode it with the user's
@@ -387,17 +393,19 @@ def build_server(deps: Deps) -> MCPServer:
             over = (request.headers.get("content-length") or "").isdigit() \
                 and int(request.headers["content-length"]) > declared
             if over:
-                raise IngestError("file_too_large",
-                                  bytes=int(request.headers["content-length"]),
-                                  max_bytes=declared)
+                raise ingest.IngestError("file_too_large",
+                                         bytes=int(request.headers["content-length"]),
+                                         max_bytes=declared)
             data = await request.body()
             if len(data) != declared:      # chunked or lying Content-Length
-                raise IngestError("size_mismatch", bytes=len(data), expected=declared,
-                                  hint="body must match the size the ticket was issued "
-                                       "for; issue a fresh file_upload_ticket")
-            path = save_upload(Path(cfgi.dir), uid, data, max(declared, limit))
-        except IngestError as e:
+                raise ingest.IngestError(
+                    "size_mismatch", bytes=len(data), expected=declared,
+                    hint="body must match the size the ticket was issued for; issue a "
+                         "fresh file_upload_ticket")
+            path = ingest.save_upload(Path(cfgi.dir), uid, data, max(declared, limit))
+        except ingest.IngestError as e:
             code = {"ticket_expired": 410, "already_uploaded": 409,
+                    "ticket_consumed": 409,
                     "file_too_large": 413, "size_mismatch": 413,
                     "ingest_disabled": 503}.get(e.payload["error"], 400)
             return JSONResponse(e.payload, status_code=code)

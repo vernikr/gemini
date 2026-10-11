@@ -13,7 +13,7 @@ from pathlib import Path
 from gemini_router.cli import cmd_calls, cmd_doctor, cmd_quota
 from rich.console import Console
 
-from . import __version__
+from . import __version__, ingest
 from .backends import make_routers, resolve_mode
 from .config import AppCfg, load_all
 from .logging_setup import AuditLogger, enforce_audit_size, prune_jsonl, redact, setup_logging
@@ -97,7 +97,14 @@ def _run_prune(app_cfg: AppCfg, router_cfg, args) -> int:
     res = router.ledger.prune(audit_keep_days=args.audit_days or lcfg.audit_keep_days,
                               cache_ttl_s=router_cfg.cache_ttl_h * 3600, dry=args.dry)
     audit = {} if args.dry else enforce_audit_size(router.ledger, lcfg.audit_max_mb)
-    out = {"backend": mode, "jsonl_removed": removed, **res, **audit, "dry": args.dry}
+    # Third ingest prune trigger (issuance, a finished analyze_file, and this): the
+    # on-demand handle for an operator who wants the inbox empty now. None under
+    # --dry, which is a projection for the ledger only and must not read as "0".
+    icfg = app_cfg.ingest
+    inbox = None if args.dry else ingest.prune(Path(icfg.dir), icfg.keep_hours,
+                                               icfg.total_cap_mb)
+    out = {"backend": mode, "jsonl_removed": removed, **res, **audit,
+           "inbox_removed": inbox, "dry": args.dry}
     console.print(json.dumps(out, default=str))
     return 0
 
@@ -319,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("-f", "--follow", action="store_true")
     p.add_argument("--json", action="store_true", help="request JSONL instead of app.log")
     p.add_argument("--date", help="YYYY-MM-DD for --json")
-    p = sub.add_parser("prune", help="evict old logs/audit rows (retention)")
+    p = sub.add_parser("prune", help="evict old logs/audit rows/inbox blobs (retention)")
     p.add_argument("--audit-days", type=float)
     p.add_argument("--dry", action="store_true")
     p = sub.add_parser("smoke", help="real-key end-to-end check (spends ≤1 RPD)")
