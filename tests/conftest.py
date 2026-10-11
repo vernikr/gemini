@@ -6,6 +6,7 @@ import re
 from types import SimpleNamespace
 
 from gemini_router import (
+    Ledger,
     QuotaExhaustedError,
     RouterError,
     RouterEvent,
@@ -28,7 +29,7 @@ class FakeRouter:
     EXPIRY = "2099-01-01T00:00:00Z"          # never stale in tests that do not say so
 
     def __init__(self, *, budgets=None, fail_chunks=(), raise_quota=False, cfg=None,
-                 file_tokens=1234, upload_error=None, expiry=None):
+                 file_tokens=1089, upload_error=None, expiry=None):   # = image forecast: clean
         self.calls: list = []
         self.uploads: list[dict] = []
         self.file_counts: list[tuple] = []
@@ -50,7 +51,9 @@ class FakeRouter:
             quota_day_tz="America/Los_Angeles",
             chain=["gemini-3.8-flash", "gemini-3-flash-preview"],
             api_keys=[self.KEY])
-        self.ledger = SimpleNamespace(calls_tail=lambda *a, **k: [])
+        # a real in-memory ledger: router_logs and the drift record path run against the
+        # genuine surface, which is exactly why the fake used to miss drift-shaped rows
+        self.ledger = Ledger(":memory:")
 
     async def count_tokens(self, prompt: str, model=None) -> int:
         self.count_calls.append(prompt)

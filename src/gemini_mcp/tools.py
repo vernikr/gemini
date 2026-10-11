@@ -19,13 +19,17 @@ from pathlib import Path
 from typing import Any
 
 from gemini_router import (
+    DEFAULT_LEVEL,
     QuotaExhaustedError,
     Router,
     RouterError,
     RouterRequest,
     UploadedFile,
+    check_drift,
+    forecast_media_tokens,
     iso,
     key_id,
+    media_class,
     pt_midnight_ts,
 )
 from mcp.server.mcpserver.exceptions import ToolError
@@ -303,6 +307,7 @@ class _Loaded:
     enc: str                 # encoding for text, MIME for provider-bound media
     extractor: str           # 'provider/<kind>' | 'pandoc/<fmt>→gfm' | 'rtf' | 'plain'
     path: Path
+    pages: int | None = None     # pdf page count from the pre-flight; None if unknown
 
 
 def _load_and_extract(inbox: Path, upload_id: str, cfgi) -> _Loaded:
@@ -324,6 +329,7 @@ def _load_and_extract(inbox: Path, upload_id: str, cfgi) -> _Loaded:
     nbytes = path.stat().st_size
     if media:
         kind, mime = media
+        pages = None
         if kind == "pdf":
             over = nbytes > cfgi.pdf_max_mb * 1_048_576
             if over:
@@ -339,7 +345,7 @@ def _load_and_extract(inbox: Path, upload_id: str, cfgi) -> _Loaded:
                     hint="a single PDF is never split here; the provider refuses "
                          "documents over this page count (zero quota spent)")
         return _Loaded(side=side, nbytes=nbytes, text=None, enc=mime,
-                       extractor=f"provider/{kind}", path=path)
+                       extractor=f"provider/{kind}", path=path, pages=pages)
     if not cfgi.files_api and ingest.media_kind(head, filename):
         kind, mime = ingest.media_kind(head, filename)
         raise ingest.IngestError(
@@ -471,6 +477,18 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
     # The TPM gate must include the file: the router refuses a request that carries
     # files without a measured estimate, and this is that measurement.
     est = file_tokens + max(1, len(task) // 4)
+    # Wave 1 drift signal: the router's tariff table predicted the cost before this call;
+    # a miss is a note for the owner, never an error — the request ran on the measurement.
+    # A pdf with unknown page count has no honest forecast, so it gets no prediction.
+    drift, cls = None, media_class(up.mime)
+    if file_tokens and (cls != "pdf" or loaded.pages):
+        try:
+            predicted = forecast_media_tokens(up.mime, pages=loaded.pages or 1,
+                                              level=up.media_resolution)
+        except ValueError:
+            predicted = None
+        if predicted:
+            drift = check_drift(predicted, file_tokens)
     req = RouterRequest(prompt=task, system=params.get("system"),
                         thinking_level=params.get("thinking_level")
                         or deps.app_cfg.thinking.default,
@@ -498,6 +516,14 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
                      "extractor": loaded.extractor, "via": "files_api",
                      "provider": {"name": up.name, "uri": up.uri,
                                   "expires_at": up.expires_at, "key_id": up.key_id}}}
+    if drift:
+        meta["cost"] = {"drift": drift}
+        led = getattr(router, "ledger", None)
+        if led is not None and hasattr(led, "record_drift"):
+            led.record_drift(key_id=up.key_id, model=res.model, media_cls=cls,
+                             level=up.media_resolution or DEFAULT_LEVEL.get(cls, ""),
+                             predicted=drift["predicted"], measured=drift["measured"],
+                             source="mcp")
     deps.audit.record({"ts": time.time(), "tool": "analyze_file", "upload_id": upload_id,
                        "filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
                        "file_tokens": file_tokens, "via": "files_api",
@@ -507,6 +533,10 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
               + (f", {file_tokens} tokens" if file_tokens else "")
               + (f", {up.media_resolution}" if up.media_resolution else "")
               + f") via Files API · {_report(meta)}")
+    if drift:
+        report += (f" · COST DRIFT: {cls} predicted {drift['predicted']} tokens, measured "
+                   f"{drift['measured']} ({drift['pct']:+.1f}%) — tell the owner the "
+                   "router's media tariff table is stale and needs re-measuring")
     return {"report": report, "result": res.text, "meta": meta}
 
 

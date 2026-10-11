@@ -310,3 +310,43 @@ async def test_a_reused_provider_reference_also_carries_the_level(tmp_path, monk
     assert len(router.uploads) == 1, "the second call must reuse, not re-upload"
     assert router.file_count_levels == ["high"]
     assert router.files_seen[1][0].media_resolution == "high"
+
+
+# ------------------------------------------------------------------ cost drift signal
+async def test_cost_drift_reported_and_recorded(tmp_path, monkeypatch):
+    """Wave 1: the router's tariff table said 1089 for an image, the measurement says
+    otherwise — the payload carries meta.cost.drift, the report tells the agent to inform
+    the owner, and the ledger keeps a non-spending drift row for doctor/quota."""
+    router = FakeRouter(file_tokens=2000)
+    deps = _deps(tmp_path, monkeypatch, router=router)
+    up_id = await _uploaded(deps, "shot.png", PNG_BYTES)
+    out = await _analyze(deps, up_id)
+
+    assert out["meta"]["cost"]["drift"] == {"predicted": 1089, "measured": 2000,
+                                            "pct": 83.7}
+    assert "COST DRIFT" in out["report"] and "tell the owner" in out["report"]
+    rows = router.ledger.drift_recent()
+    assert len(rows) == 1
+    assert rows[0]["class"] == "image" and rows[0]["level"] == "high"
+    assert rows[0]["predicted"] == 1089 and rows[0]["measured"] == 2000
+
+
+async def test_no_drift_field_when_the_forecast_holds(tmp_path, monkeypatch):
+    router = FakeRouter(file_tokens=1089)             # exactly the image forecast
+    deps = _deps(tmp_path, monkeypatch, router=router)
+    up_id = await _uploaded(deps, "shot.png", PNG_BYTES)
+    out = await _analyze(deps, up_id)
+    assert "cost" not in out["meta"]
+    assert "COST DRIFT" not in out["report"]
+    assert router.ledger.drift_recent() == []
+
+
+async def test_pdf_without_page_count_gets_no_forecast(tmp_path, monkeypatch):
+    """No page count → no honest prediction → no signal, not even a wrong one."""
+    monkeypatch.setattr(ingest, "pdf_pages", lambda *a, **k: None)
+    router = FakeRouter(file_tokens=9999)
+    deps = _deps(tmp_path, monkeypatch, router=router)
+    up_id = await _uploaded(deps, "report.pdf", PDF_BYTES)
+    out = await _analyze(deps, up_id)
+    assert "cost" not in out["meta"]
+    assert router.ledger.drift_recent() == []

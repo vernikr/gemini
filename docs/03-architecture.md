@@ -311,6 +311,11 @@ Flow:
    key is still configured — the blob cannot change for a given `upload_id`, so re-analysis
    costs one request, not one upload. Cache keys mix in the blob's content hash, never the
    provider URI (a URI changes on every re-upload).
+   Cost drift (FR-B12): the router's tariff table (`gemini_router.tariffs.MEDIA_TARIFFS`,
+   the single copy of the prices) predicts the measured cost before the call; a miss beyond
+   the noise floor lands as `meta.cost.drift` plus a one-line instruction to tell the owner
+   and a non-spending ledger row that `doctor`/`quota` surface. A pdf with unknown page
+   count gets no prediction, and a miss never fails the request.
 4. Retention (FR-E9): blobs, sidecars and spent-ticket markers age out at `keep_hours`,
    the total is capped by `total_cap_mb` (oldest first); prune runs on ticket issuance,
    at the start of every `analyze_file` and on demand via `gemini-mcp prune`, so an

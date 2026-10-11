@@ -58,9 +58,14 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 - **FR-B10** `analyze_file` MUST accept PDFs, images, audio and video by sending the bytes
 - FR-B11: binary media (PDF, image, audio, video) is read by the provider at a
   **configurable resolution level** (`ingest.media_resolution`, default `high`):
-  the level decides the token price (measured 256/529/1089 per image and
-  280/560/1120 per PDF page at low/medium/high) and is reported in
-  `meta.file.resolution`; `""` inherits the provider default.
+  the level decides the token price (per-level prices and provider defaults live in ONE
+  table — `gemini_router.tariffs.MEDIA_TARIFFS` — and are restated nowhere else) and is
+  reported in `meta.file.resolution`; `""` inherits the provider default.
+- FR-B12: when the measured media cost misses the router's tariff forecast beyond the
+  noise floor, the provider-path result MUST carry `meta.cost.drift`
+  (`predicted`/`measured`/`pct`) and the report MUST instruct the agent to tell the
+  owner; the miss is recorded as a non-spending ledger row which `doctor` and `quota`
+  surface while it is recent. A miss is a signal, never an error.
   to the provider's Files API (option A, owner decision 2026-10-11): one upload, one
   request pinned to the key that owns the file, one measured token count before the
   request so the TPM gate is honest. A single file is never split. Text the server can
