@@ -12,23 +12,58 @@ for this workflow. Two requirements came with it:
 ## Why A still costs more work than B
 
 Not the upload protocol — start, upload+finalize, poll for `ACTIVE` is two calls and a
-retry, and the router client already has the error taxonomy for it. The cost is that A
-changes the shape of a model request in a codebase built on "a prompt is a string":
+retry, and the router client already has the error taxonomy for it. The cost is that a
+request built around file bytes stops being a plain string, so:
 
-- the request carries a **file reference part**, so the pipeline's chunking cannot apply —
-  bytes are one request and one answer, and the plan pre-flight has to reason about
-  something it cannot tokenize with the current estimator;
+- the plan pre-flight has to reason about a request it cannot tokenize with the current
+  estimator (solved below by measuring, not estimating);
 - the provider gains a **second lifecycle owned by us** (uploaded files, their state and
   expiry) that the ledger has to mention without polluting per-model RPD accounting;
 - a **new surface to mock** in the no-network test suite (upload start, finalize, state
   poll, expiry) plus one live probe to confirm limits against the real API.
 
-B changes none of that: local conversion keeps every request a string, so chunking,
-caching, progress and the ledger keep working untouched. That is the whole difference —
-and given the owner's clarifications (48 h is a feature, storage is unreachable), A's
-extra cost is worth paying for model-quality answers on scans and figures.
+B changes none of that: local conversion keeps every request a string. Given the owner's
+clarifications (48 h is a feature, storage is unreachable), A's extra cost is worth paying
+for model-quality answers on scans and figures.
+
+## Owner corrections (2026-10-11), adopted
+
+**1. The boundary is extractable vs not, not text vs binary.** Text the server can already
+pull out of a file — pandoc set, our RTF parser, and PDFs with a text layer via the new
+poppler extraction — keeps the existing pipeline: chunking, overlap, consolidation, the
+content cache. Chunking does not stop applying; it stops applying only to the bytes we
+hand to the provider (scans, figure-heavy pages, images, audio). So the routing rule is:
+
+```
+file → can we get text? → yes → existing text pipeline (chunkable, cacheable, cheap)
+                          → no  → Files API: one request per file, measured tokens
+```
+
+**2. Cache decision: key on content, never on the provider URI.** A cache key that
+includes `file_uri` would miss every time the file is re-uploaded — after 48 h, or on a
+different key — and re-spend on work already done. A key that ignores the file would let
+two different files collide under one task. So the key extends today's content hash with
+`sha256(file bytes) + mime` for the binary path, and with the extracted text for the
+extractable path. The URI stays out of the key, which makes a cache hit survive re-uploads
+and travel across keys. Our cache stores results, not files, so provider expiry never
+invalidates it.
+
+**3. Every upload is per key.** The owner's keys are separate Google accounts, so a file
+uploaded with one key is invisible to the next. That fixes the request order: the router
+picks the serving key first (chain × budget, as today), the upload happens with that key,
+and a retry on another key re-uploads — a cheap operation next to the analysis it enables,
+and only on failure. The URI cache is therefore keyed by `(key_id, file hash)`; on failure
+the retry path re-uploads once for the new key and caches that too. If the measured tokens
+cannot fit any key's remaining per-minute budget, that is a pre-flight refusal carrying the
+measured number and the reset ETA, exactly like the existing quota refusal — never a
+half-sent request.
 
 ## Phase C1 — one file, one request
+
+**Routing inside `analyze_file`:** extract where possible (pandoc set, RTF, PDF text layer),
+otherwise go to the Files API. A PDF that yields no meaningful text — a scan — stops being
+an error and becomes the case the Files API exists for. Page count and size ceilings are
+checked here, before any upload.
 
 **Router (`gemini-router`), the quota authority and the API client:**
 
@@ -67,10 +102,12 @@ extra cost is worth paying for model-quality answers on scans and figures.
 ## Phase C2 — groups of files, packed by measured tokens
 
 The existing pipeline already knows how to split a job into requests and consolidate the
-answers; files are simply chunks whose size we measure instead of estimate. So:
+answers; files are simply inputs whose size we measure instead of estimate. So:
 
-- `analyze_file` (or a sibling tool) accepts several upload ids; each is uploaded and
-  token-measured, then packed into requests that fit the remaining TPM/context budget;
+- a file-groups call accepts several upload ids; **extractable** files join the text
+  pipeline first (their text is chunkable like any other body), while **binary** files are
+  uploaded and token-measured, then packed into requests that fit the chosen key's
+  remaining per-minute budget and context window;
 - per-group progress and per-group ledger rows, then the existing consolidation stage
   produces the single final answer;
 - one PDF is never split — a file that alone exceeds the budget is refused with its
