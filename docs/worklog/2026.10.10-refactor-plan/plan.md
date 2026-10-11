@@ -309,7 +309,7 @@ Honest caveat: in absolute terms this is 4 ms on a fast machine. The real argume
 (a) WAL write-lock contention across processes on the *shared* ledger and (b) the 1 vCPU
 production box — which is why it belongs with the ledger work in 2.6, not before it.
 
-### 3.4 Sequential `listModels` per key on cache miss · **S** · risk low
+### 3.4 Sequential `listModels` per key on cache miss · **S** · risk low · **done 2026-10-11, router 0.1.9 / mcp 0.17.0**
 
 `availability()` loops keys serially (`routing.py:131-135`). With 10 keys that is 10 round
 trips before the first request of each 12 h window. `asyncio.gather` → one round trip of
@@ -1027,3 +1027,83 @@ Unauthorized**. Recorded as blocker **b07** with the one action needed.
 PyPI 0.16.0, deploy and the server are all green; the npm package is a bootstrap shim
 pinning `gemini-mcp-gateway==<version>`, so npm consumers get a working gateway one
 release behind. The job now fails with the reason in the log rather than a 404.
+
+---
+
+## 16 · Task 3.4 + the Flash deprecation (shipped 2026-10-11, router 0.1.9 / mcp 0.17.0)
+
+### 3.4 was the wrong fix — the owner's question found the real one
+
+The plan called 3.4 "sequential `listModels` per key" and proposed making the probe
+concurrent. The owner asked why the router asks every key at all when they all point at
+one endpoint and one plan. That is the better question: the model list is a property of
+the account tier, so N calls return the same answer. Parallelising them would have made
+a pointless round trip faster instead of removing it.
+
+`availability()` now probes the first key and applies the answer to the rest —
+**4 calls → 1** on a four-key config, measured. `availability_per_key()` answers the
+different question "does *this* key work", and three places need it because they print a
+per-key result: `doctor`, `models`, and the setup wizard's key check. With a shared
+probe those would print one answer copied N times as though each key had been checked —
+which is worse than the extra round trip.
+
+A key is still never marked dead by a failed `listModels`. Refusing a key is
+`generateContent`'s job (2.1), and one key's failure says nothing about the others.
+
+The test was verified against the old implementation: it fails there with 4 calls, not
+1. Getting that right took a second attempt — the first version of the test passed with
+the old code restored, because the old loop happened to exit early when every key was
+healthy. A test that passes on the code it is meant to catch is not a test.
+
+### The deprecation: verified before changing anything
+
+`gemini-3.5-flash` → `gemini-3.6-flash` and `gemini-3.7-flash` → `gemini-3.8-flash`, both
+aliases now. Confirmed against the live API rather than taken from the announcement: a
+`generateContent` call to `gemini-3.5-flash` returns `modelVersion: "gemini-3.6-flash"`,
+and `gemini-3.7-flash` returns `"gemini-3.8-flash"`.
+
+Three things followed that the announcement alone would not have shown:
+
+- **The aliases are still listed by `listModels`.** So a chain built from that list keeps
+  offering models nobody can select, and the router's own model validation would have
+  kept passing them.
+- **`optimal_chain` put 3.5 second**, so most traffic asked for an alias and had its
+  budget charged to a model that never served the request.
+- **The chains were in three places** — `gemini-router/config.py`, `gemini-mcp/config.py`
+  and `config.yaml` — plus four docs and `INSTRUCTIONS`.
+
+New chains: `best_available` 3.8 → 3.6 → 3-flash-preview; `optimal` 3.6 →
+3-flash-preview → 3.8 (older first, which is what the empirical-availability order was
+for). All three models verified live, including 3.8 after one empty response that turned
+out to be a dropped connection rather than a refusal.
+
+### The model ids came out of the prose
+
+Every hardcoded list in the docs and in `INSTRUCTIONS` is gone. A list in a document goes
+stale the moment Google deprecates something, and an agent reading "try 3.7" would pin an
+alias. `INSTRUCTIONS` now tells the agent not to pin `model` unless asked, which is the
+instruction that survives the next deprecation. `FR-C1` describes the chain instead of
+naming it.
+
+Also fixed while in there: `docs/02` claimed `thinking_level` defaults to `high`; the
+code has said `medium` since 1.1 closed.
+
+### Deploy
+
+The server's own `config.yaml` still had both old chains — push-CD replaces the package
+and never touches that file, so a chain change does not reach a deployed server on its
+own. Corrected in place with a backup in `/root/bak/`, service restarted.
+
+`smoke` on the VPS: model answered `'OK'`, `SMOKE OK — backend=router`, and the quota
+table now lists **four real models** where it used to list six, two of them aliases.
+Release pipeline green in 189 s on rerun (the first attempt hit PyPI index lag again, the
+same 36-second window as §14). `gemini-router` **58 passed**, `gemini-mcp` **115 passed**.
+
+### What this leaves
+
+The 02/03 merge from 1.2 was assessed and **not done**: the two documents do not
+duplicate each other — 02 is requirements (`FR-x`, 24 live references from `src/` and
+`tests/`), 03 is design, and 8 inbound links across both repos point at them by name.
+Merging would move ~500 lines and break every one of those links for no deduplication
+gain. 1.2's real goal — getting history out of the default read path — was met in wave 2
+by the archive move.
