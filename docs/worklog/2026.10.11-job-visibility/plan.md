@@ -21,6 +21,15 @@ the surface every agent already uses — the running ticket.
 - Tests: tests/test_jobs.py (ticket carries live from submit; router event → phase map
   + eta; gateway stage clears eta; runner stages visible mid-poll).
 
+## Live probe on the production daemon (0.23.0, 2026-10-11)
+
+`analyze_large` with `wait_seconds=0`, then 1s polls. Observed sequence:
+`received` (task/body sizes) → `generating` (dispatch → gemini-3.6-flash, key id
+visible) → provider HTTP 503 → `retrying` attempt=1 with `eta_s` counting
+4.8 → 0.0 → retry succeeded, final answer returned. The countdown, the phase
+transitions and the model/key attribution all worked against a REAL transient
+failure — exactly the "what is happening right now" this wave was about.
+
 ## Open question carried forward (not blocking)
 
 Does the host harness surface MCP progress notifications? If yes, `live` is still the
