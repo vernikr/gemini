@@ -787,6 +787,9 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
             "cache_hits": pipe._cache_hits + text_hits + group_hits,
             "quota_after": router.model_budgets(),
             "elapsed_s": round(time.time() - t0, 1), "progress_trace": emitter.trace}
+    drifts = [it["drift"] for it in bins if it.get("drift")]
+    if drifts:
+        meta["cost"] = {"drift": drifts}
     report = (f"files={len(loadeds)} ({k} group request(s)"
               + (f", {sum(1 for _, ld in loadeds if ld.text is not None)} text doc(s)"
                  if any(ld.text is not None for _, ld in loadeds) else "")
