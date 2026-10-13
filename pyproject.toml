@@ -1,13 +1,13 @@
 [project]
 name = "gemini-mcp-gateway"   # PyPI dist name (gemini-mcp taken); CLI bin stays gemini-mcp
-version = "0.24.4"
+version = "0.25.0"
 description = "MCP gateway for massive-payload Gemini analysis on the AI Studio free tier: chunking with overlap, consolidation, thinking_level control, deep progress, rotating disk logs"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "vernikr" }]
 dependencies = [
-    "gemini-router>=0.3,<0.4",
+    "gemini-router>=0.4,<0.5",
     "mcp[cli]>=1.9",
     "uvicorn>=0.30",
     "starlette>=0.37",
@@ -55,4 +55,4 @@ select = ["E", "F", "I", "UP", "B"]
 
 [tool.uv.sources]
 # dev-only: consumers of the PyPI wheel get gemini-router from PyPI (metadata is clean)
-gemini-router = { git = "https://github.com/vernikr/gemini-router.git", tag = "v0.3.6" }
+gemini-router = { git = "https://github.com/vernikr/gemini-router.git", tag = "v0.4.2" }

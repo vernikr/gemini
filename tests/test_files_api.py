@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -79,8 +80,11 @@ async def test_pdf_runs_one_pinned_measured_request(tmp_path, monkeypatch):
 
     assert len(router.uploads) == 1                       # one file, one upload
     assert router.uploads[0]["mime"] == "application/pdf"
+    assert router.uploads[0]["overflow"] == "lite+gemma"
     assert len(router.calls) == 1                         # one file, ONE request
-    assert router.files_seen[0][0].key_id                 # pinned to the uploading key
+    assert router.files_seen[0][0].key_id                 # initial upload key
+    assert len(router.file_paths_seen[0]) == 1            # source for key rotation
+    assert Path(router.file_paths_seen[0][0]).read_bytes() == PDF_BYTES
     req = router.calls[0]
     # the TPM gate is fed the measured file tokens, not a text estimate
     assert req.est_tokens >= 1234
@@ -98,6 +102,28 @@ async def test_pdf_runs_one_pinned_measured_request(tmp_path, monkeypatch):
     assert "files/f1" in uploaded["message"] and "1234 tokens" in uploaded["message"]
 
 
+async def test_pdf_reports_serving_uri_and_warns_on_unrequested_lite(
+        tmp_path, monkeypatch):
+    class RotatingRouter(FakeRouter):
+        async def complete(self, req, on_event=None, files=None, file_paths=None):
+            res = await super().complete(req, on_event, files, file_paths)
+            served = replace(files[0], name="files/rotated",
+                             uri="https://provider.test/files/rotated", key_id="other")
+            return replace(res, model="gemini-3.5-flash-lite", key_id="other",
+                           overflow_tier=1, files_used=[served])
+
+    router = RotatingRouter(file_tokens=1234)
+    deps = _deps(tmp_path, monkeypatch, router=router)
+    up_id = await _uploaded(deps, "report.pdf", PDF_BYTES)
+    out = await _analyze(deps, up_id)
+    assert out["meta"]["file"]["provider"]["name"] == "files/rotated"
+    assert out["meta"]["file"]["provider"]["key_id"] == "other"
+    assert out["meta"]["key_id"] == "other"
+    side = ingest.load_sidecar(Path(deps.app_cfg.ingest.dir), up_id)
+    assert side["provider"]["name"] == "files/rotated"
+    assert out["report"].startswith("file=report.pdf") and "⚠️" in out["report"]
+
+
 async def test_image_and_audio_take_the_same_path(tmp_path, monkeypatch):
     router = FakeRouter()
     deps = _deps(tmp_path, monkeypatch, router=router)
@@ -106,6 +132,7 @@ async def test_image_and_audio_take_the_same_path(tmp_path, monkeypatch):
         out = await _analyze(deps, up_id)
         assert out["meta"]["file"]["via"] == "files_api"
     assert [u["mime"] for u in router.uploads] == ["image/png", "audio/wav"]
+    assert [u["overflow"] for u in router.uploads] == ["off", "off"]
 
 
 async def test_text_documents_keep_the_old_pipeline(tmp_path, monkeypatch):

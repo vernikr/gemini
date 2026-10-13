@@ -557,8 +557,10 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
                             f"{filename}: {loaded.nbytes} bytes → provider Files API "
                             f"({loaded.enc})")
         try:
-            up = await router.upload_file(loaded.path, mime=loaded.enc, model=model,
-                                          source="mcp", display_name=filename)
+            up = await router.upload_file(
+                loaded.path, mime=loaded.enc, model=model, source="mcp",
+                overflow=ovf if loaded.enc == "application/pdf" else "off",
+                display_name=filename)
         except QuotaExhaustedError as e:
             raise _fail(deps, emitter, "analyze_file", params.get("request_id"), e) from e
         except RouterError as e:
@@ -603,9 +605,17 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
                         request_id=params.get("request_id"), source="mcp",
                         kind="single", est_tokens=est)
     try:
-        res = await router.complete(req, on_event=emitter.router_event_sync, files=[up])
+        res = await router.complete(
+            req, on_event=emitter.router_event_sync, files=[up],
+            file_paths=[loaded.path] if up.mime == "application/pdf" else None)
     except QuotaExhaustedError as e:
         raise _fail(deps, emitter, "analyze_file", req.request_id, e) from e
+    served = res.files_used[0] if res.files_used else up
+    if served.key_id != up.key_id:
+        await asyncio.to_thread(ingest.save_provider_ref, inbox, upload_id, {
+            "name": served.name, "uri": served.uri, "mime": served.mime,
+            "expires_at": served.expires_at, "key_id": served.key_id,
+            "sha256": served.sha256})
     await emitter.stage("done", 100, f"done on {res.model} in {res.latency_s:.1f}s")
     await emitter.drain()
     meta = {"request_id": res.request_id, "model": res.model, "key_id": res.key_id,
@@ -619,15 +629,15 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
             "file": {"filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
                      "tokens": file_tokens, "resolution": up.media_resolution,
                      "extractor": loaded.extractor, "via": "files_api",
-                     "provider": {"name": up.name, "uri": up.uri,
-                                  "expires_at": up.expires_at, "key_id": up.key_id}}}
+                     "provider": {"name": served.name, "uri": served.uri,
+                                  "expires_at": served.expires_at, "key_id": served.key_id}}}
     if drift:
         meta["cost"] = {"drift": drift}
         _record_drift(deps, router, up.key_id, res.model, cls, up.media_resolution, drift)
     deps.audit.record({"ts": time.time(), "tool": "analyze_file", "upload_id": upload_id,
                        "filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
                        "file_tokens": file_tokens, "via": "files_api",
-                       "provider_file": up.name, "request_id": res.request_id,
+                       "provider_file": served.name, "request_id": res.request_id,
                        "model": res.model, "cached": res.cached})
     report = (f"file={filename} ({loaded.nbytes} bytes"
               + (f", {file_tokens} tokens" if file_tokens else "")
@@ -718,8 +728,8 @@ async def _analyze_split_pdf(deps: Deps, emitter: ProgressEmitter, params: dict,
                                        measured, tpm, f"part {first}-{last} could not be "
                                        "uploaded/measured; no unmeasured request was sent",
                                        completed_parts=i) from e
-            finally:
-                path.unlink(missing_ok=True)
+            # Keep the local chunk until generation ends: key failover may need it
+            # for a fresh upload. TemporaryDirectory removes it on any exit.
             if not tokens or tokens + overhead > tpm:
                 if first == last or len(ranges) >= _PDF_MAX_PARTS:
                     raise _pdf_split_error("pdf_split_over_budget", filename,
@@ -740,7 +750,7 @@ async def _analyze_split_pdf(deps: Deps, emitter: ProgressEmitter, params: dict,
                 source="mcp", kind="chunk", est_tokens=tokens + overhead)
             try:
                 res = await router.complete(req, on_event=emitter.router_event_sync,
-                                            files=[chunk])
+                                            files=[chunk], file_paths=[path])
             except QuotaExhaustedError as e:
                 raise _fail(deps, emitter, "analyze_file", req.request_id, e) from e
             if not (res.text or "").strip():
@@ -880,6 +890,8 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
                            "extractor": loaded.extractor, "via": "text"})
 
     # -- binaries: upload (or reuse), measure for free, then pack by measured tokens
+    pdf_in_group = any(ld.text is None and ld.enc == "application/pdf"
+                       for _, ld in loadeds)
     bins: list[dict] = []
     for uid, loaded in loadeds:
         if loaded.text is not None:
@@ -894,8 +906,9 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
                                 f"{filename}: {loaded.nbytes} bytes → provider Files API "
                                 f"({loaded.enc})")
             try:
-                up = await router.upload_file(loaded.path, mime=loaded.enc, model=model,
-                                              source="mcp", display_name=filename)
+                up = await router.upload_file(
+                    loaded.path, mime=loaded.enc, model=model, source="mcp",
+                    overflow=ovf if pdf_in_group else "off", display_name=filename)
             except QuotaExhaustedError as e:
                 raise _fail(deps, emitter, "analyze_files", rid, e) from e
             except RouterError as e:
@@ -983,8 +996,11 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
                 request_id=f"{rid}:g{gi}" if rid else None, source="mcp",
                 kind="chunk", est_tokens=toks + overhead)
             try:
-                res = await router.complete(req, on_event=on_ev,
-                                            files=[it["up"] for it in pack])
+                res = await router.complete(
+                    req, on_event=on_ev, files=[it["up"] for it in pack],
+                    file_paths=([it["loaded"].path for it in pack]
+                                if any(it["up"].mime == "application/pdf" for it in pack)
+                                else None))
             except QuotaExhaustedError as e:
                 raise _fail(deps, emitter, "analyze_files", rid, e) from e
             if not (res.text or "").strip():
@@ -999,15 +1015,23 @@ async def analyze_files_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
             groups_meta.append({"group": gi,
                                 "files": [it["filename"] for it in pack],
                                 "tokens": toks, "model": res.model})
-            for it in pack:
+            served_files = res.files_used
+            for index, it in enumerate(pack):
+                served = served_files[index] if served_files else it["up"]
+                if served.key_id != it["up"].key_id:
+                    await asyncio.to_thread(ingest.save_provider_ref, inbox,
+                                            it["upload_id"], {
+                        "name": served.name, "uri": served.uri, "mime": served.mime,
+                        "expires_at": served.expires_at, "key_id": served.key_id,
+                        "sha256": served.sha256})
                 files_meta.append({
                     "upload_id": it["upload_id"], "filename": it["filename"],
                     "bytes": it["loaded"].nbytes, "mime": it["up"].mime,
                     "tokens": it["tokens"], "resolution": it["up"].media_resolution,
                     "via": "files_api", "group": gi,
-                    "provider": {"name": it["up"].name, "uri": it["up"].uri,
-                                 "expires_at": it["up"].expires_at,
-                                 "key_id": it["up"].key_id}})
+                    "provider": {"name": served.name, "uri": served.uri,
+                                 "expires_at": served.expires_at,
+                                 "key_id": served.key_id}})
 
     # -- one final answer from all parts
     rounds = 0

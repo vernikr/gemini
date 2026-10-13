@@ -74,6 +74,7 @@ async def test_split_four_pages_per_file_then_consolidate(tmp_path, monkeypatch)
     assert out["meta"]["file"]["split"]["resolution"] == "high"
     assert [c.kind for c in router.calls] == ["chunk"] * 4 + ["consolidate"]
     assert all(len(fs) == 1 for fs in router.files_seen[:4])
+    assert all(len(paths) == 1 for paths in router.file_paths_seen[:4])
     assert all(c.est_tokens <= 2500 for c in router.calls[:4])
     assert out["result"] == "CONSOLIDATED[4]"
     assert out["meta"]["requests_spent"] == 5

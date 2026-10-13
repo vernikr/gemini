@@ -314,9 +314,11 @@ Flow:
      chunks/consolidates it, with caching and progress unchanged;
    - **PDF/image/audio/video** → the provider's Files API: the blob stays on disk and is
      streamed to the provider by the router library, the token cost is measured
-     (`count_file_tokens`, free per FR-C7) and ONE request follows, pinned to the key that
-     owns the file (a file lives in its key's project). Exception: a PDF whose
-     measured request exceeds FULL TPM is split into page ranges (FR-B14).
+     (`count_file_tokens`, free per FR-C7) and ONE request follows. The first upload
+     is key-local; PDF requests follow text routing and re-upload the local blob if
+     another key is chosen. Image/audio/video-only calls retain key pinning.
+     Exception: a PDF whose measured request exceeds FULL TPM is split into page
+     ranges (FR-B14).
    - anything else fails fast with `binary_file_needs_conversion` (ZERO spend); a PDF over
      the pre-flight ceilings fails with `pdf_too_large`/`pdf_too_many_pages`, also before
      any upload. `pdfinfo` (poppler-utils) supplies the page count; it never reads content.
@@ -324,7 +326,8 @@ Flow:
    where the provider block carries `{name, uri, expires_at, key_id}`.
    The reference is cached in the upload sidecar and reused while unexpired and while its
    key is still configured — the blob cannot change for a given `upload_id`, so re-analysis
-   costs one request, not one upload. Cache keys mix in the blob's content hash, never the
+   costs one request, not one upload. When a key switch succeeds, the sidecar is updated
+   to the new serving reference. Cache keys mix in the blob's content hash, never the
    provider URI (a URI changes on every re-upload).
    Cost drift (FR-B12): the router's tariff table (`gemini_router.tariffs.MEDIA_TARIFFS`,
    the single copy of the prices) predicts the measured cost before the call; a miss beyond
@@ -336,8 +339,10 @@ Flow:
    pipeline run; each binary is uploaded (or its reference reused) and token-measured for
    free, then packs are built first-fit-decreasing against the serving key's remaining
    FULL minute budget minus a prompt overhead (a temporarily occupied minute is
-   waited out, not treated as a reason to split) — uploads are per key, so a pack never
-   crosses keys. Every pack is one request with its files pinned (`kind='chunk'`). A PDF
+   waited out, not treated as a reason to split). A pack never mixes provider files
+   from different keys: for packs containing PDFs, failover uploads the entire
+   local-source pack to the new key first. Non-PDF packs keep prior key pinning.
+   Every pack is one request (`kind='chunk'`). A PDF
    over FULL TPM instead goes through qpdf: page ranges are uploaded and re-measured
    at the same resolution, split further if a measured range does not fit, then each
    range gets a separate request containing that PDF part only. Ranges consolidate to

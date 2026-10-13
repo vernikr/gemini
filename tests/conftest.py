@@ -34,6 +34,7 @@ class FakeRouter:
         self.uploads: list[dict] = []
         self.file_counts: list[tuple] = []
         self.files_seen: list[list] = []
+        self.file_paths_seen: list[list] = []
         self.file_count_levels: list[str | None] = []
         self.file_tokens = file_tokens
         self.upload_error = upload_error
@@ -63,14 +64,15 @@ class FakeRouter:
 
     # ------------------------------------------------------------ Files API
     async def upload_file(self, path, *, mime=None, model=None, source="cli",
-                          display_name=None, key=None, sha256=None,
+                          display_name=None, key=None, overflow="off", sha256=None,
                           ready_timeout_s=30.0) -> UploadedFile:
         if self.upload_error:
             raise self.upload_error
         from pathlib import Path as _P
 
         self.uploads.append({"path": str(path), "mime": mime, "model": model,
-                             "source": source, "display_name": display_name})
+                             "source": source, "display_name": display_name,
+                             "overflow": overflow})
         n = len(self.uploads)
         return UploadedFile(name=f"files/f{n}", uri=f"https://provider.test/files/f{n}",
                             mime=mime or "application/octet-stream",
@@ -84,12 +86,17 @@ class FakeRouter:
         self.file_count_levels.append(media_resolution)
         return self.file_tokens
 
-    async def complete(self, req, on_event=None, files=None) -> RouterResult:
+    async def complete(self, req, on_event=None, files=None, file_paths=None) -> RouterResult:
         if self.raise_quota:
             raise QuotaExhaustedError(self.budgets, "2026-10-09T07:00:00+00:00",
                                       hint="test")
         self.calls.append(req)
         self.files_seen.append(list(files or []))
+        self.file_paths_seen.append(list(file_paths or []))
+        if file_paths:
+            from pathlib import Path as _P
+            assert len(file_paths) == len(files or [])
+            assert all(_P(p).is_file() for p in file_paths)  # usable for key re-upload
         if on_event:
             on_event(RouterEvent(stage="dispatch", model="gemini-3.8-flash",
                                  key_id="fake", detail={"est_tokens": req.est_tokens or 0}))

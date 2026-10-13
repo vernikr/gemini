@@ -7,6 +7,7 @@ pipeline; the parts consolidate into one result. No network (b01)."""
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -20,6 +21,7 @@ from gemini_mcp.progress import ProgressEmitter
 from gemini_mcp.tools import _pack_bins, analyze_files_tool, file_upload_ticket_tool
 
 PNG_BYTES = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+PDF_BYTES = b"%PDF-1.7\n1 0 obj\n<< /Type /Catalog >>\nendobj\ntrailer\n%%EOF\n"
 
 
 def _cfg(tpm: int):
@@ -69,9 +71,11 @@ async def test_two_images_fit_one_pack_and_skip_consolidation(tmp_path, monkeypa
     out = await _analyze(deps, ids)
 
     assert len(router.uploads) == 2
+    assert [u["overflow"] for u in router.uploads] == ["off", "off"]
     assert len(router.calls) == 1                                 # one pack, no consolidate
     assert router.calls[0].kind == "chunk"
     assert len(router.files_seen[0]) == 2                         # both files in ONE request
+    assert router.file_paths_seen[0] == []                        # image-only stays pinned
     assert out["result"] == "analysis-of-group-1-of-1"
     assert out["meta"]["groups"] == [{"group": 1, "files": ["shot1.png", "shot2.png"],
                                       "tokens": 4000, "model": "gemini-3.8-flash"}]
@@ -80,6 +84,48 @@ async def test_two_images_fit_one_pack_and_skip_consolidation(tmp_path, monkeypa
     # the measured cost missed the forecast → the wave-1 drift signal rides along
     assert "COST DRIFT" in out["report"]
     assert len(router.ledger.drift_recent()) == 2
+
+
+async def test_pdf_pack_supplies_all_local_sources_for_key_rotation(tmp_path, monkeypatch):
+    router = FakeRouter(file_tokens=560)
+    deps = _deps(tmp_path, monkeypatch, router)
+    ids = [await _upload(deps, f"doc{i}.pdf", PDF_BYTES) for i in (1, 2)]
+    out = await _analyze(deps, ids)
+    assert out["meta"]["parts"] == 1
+    assert [u["overflow"] for u in router.uploads] == ["lite+gemma", "lite+gemma"]
+    assert len(router.files_seen[0]) == len(router.file_paths_seen[0]) == 2
+    assert all(Path(p).read_bytes() == PDF_BYTES for p in router.file_paths_seen[0])
+
+
+async def test_pdf_image_pack_can_move_whole_bundle_to_lite_key(tmp_path, monkeypatch):
+    router = FakeRouter(file_tokens=560)
+    deps = _deps(tmp_path, monkeypatch, router)
+    ids = [await _upload(deps, "doc.pdf", PDF_BYTES),
+           await _upload(deps, "shot.png", PNG_BYTES)]
+    out = await _analyze(deps, ids)
+    assert out["meta"]["parts"] == 1
+    assert [u["overflow"] for u in router.uploads] == ["lite+gemma", "lite+gemma"]
+    assert len(router.files_seen[0]) == len(router.file_paths_seen[0]) == 2
+
+
+async def test_group_metadata_uses_serving_uploads_after_key_switch(tmp_path, monkeypatch):
+    class RotatingRouter(FakeRouter):
+        async def complete(self, req, on_event=None, files=None, file_paths=None):
+            res = await super().complete(req, on_event, files, file_paths)
+            served = [replace(up, name=f"files/new-{i}",
+                              uri=f"https://provider.test/files/new-{i}", key_id="new")
+                      for i, up in enumerate(files or [], 1)]
+            return replace(res, key_id="new", files_used=served)
+
+    router = RotatingRouter(file_tokens=2000)
+    deps = _deps(tmp_path, monkeypatch, router)
+    ids = [await _upload(deps, f"shot{i}.png", PNG_BYTES) for i in (1, 2)]
+    out = await _analyze(deps, ids)
+    assert [item["provider"]["name"] for item in out["meta"]["files"]] == [
+        "files/new-1", "files/new-2"]
+    assert {item["provider"]["key_id"] for item in out["meta"]["files"]} == {"new"}
+    assert [ingest.load_sidecar(Path(deps.app_cfg.ingest.dir), uid)["provider"]["name"]
+            for uid in ids] == ["files/new-1", "files/new-2"]
 
 
 async def test_small_budget_forces_two_packs_and_consolidation(tmp_path, monkeypatch):

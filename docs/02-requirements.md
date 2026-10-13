@@ -56,9 +56,11 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   (daemon, bearer-token auth, `127.0.0.1` bind by default).
 
 - **FR-B10** `analyze_file` MUST accept PDFs, images, audio and video by sending the bytes
-  to the provider's Files API (option A, owner decision 2026-10-11): one upload, one
-  request pinned to the key that owns the file, one measured token count before the
-  request so the TPM gate is honest. Exception FR-B14 applies to PDFs over full TPM.
+  to the provider's Files API (option A, owner decision 2026-10-11): one initial
+  upload, one measured token count and one generation request when it fits. PDF
+  model/key tiers follow the same policy as text: if routing selects another key,
+  re-upload the local blob there first, never use a foreign-key file URI. Other
+  binary types retain the original key pinning. FR-B14 applies above full TPM.
   Text the server can extract (pandoc set, RTF, plain) keeps the chunked pipeline.
   Pre-flight refusals —
   unsupported type, provider document ceilings — spend nothing and say which limit was
