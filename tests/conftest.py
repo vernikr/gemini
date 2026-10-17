@@ -163,10 +163,11 @@ def make_app_cfg(log_dir="logs", **pipeline_over) -> AppCfg:
     return AppCfg.model_validate({"pipeline": pipe, "logging": {"dir": str(log_dir)}})
 
 
-def make_deps(router=None, app_cfg=None) -> Deps:
+def make_deps(router=None, app_cfg=None, backend: str = "router") -> Deps:
     return Deps(router=router or FakeRouter(),
                 app_cfg=app_cfg or make_app_cfg(),
-                audit=NullAudit(), logger=logging.getLogger("test"))
+                audit=NullAudit(), logger=logging.getLogger("test"),
+                backend=backend)
 
 
 def real_router_cfg(tmp_path, **over) -> RouterConfig:
