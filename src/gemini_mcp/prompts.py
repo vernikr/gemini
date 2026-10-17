@@ -2,6 +2,18 @@
 added later without touching logic (D8)."""
 from __future__ import annotations
 
+BREVITY_RULE = (
+    "ask Gemini for a SHORT answer by default — say so in words inside the task "
+    '("answer in 3-5 sentences", "conclusions only"). Ask for the full treatment only '
+    "when the task actually calls for it. Nothing on the server shortens an answer for "
+    "you: there is no length cap, so an over-long request is returned in full and lands "
+    "in your context. meta.result_chars says how long what you got is."
+)
+"""One canonical statement of the length policy, shared by every surface that advises
+the caller: the MCP instructions, the CLI help, and the skill. Kept here rather than
+duplicated so the three cannot drift apart — a parity test asserts each surface
+contains this exact text."""
+
 CHUNK_MARKER = (
     "[SYSTEM NOTE — CHUNK {n}/{m}] You are analyzing part {n} of {m} of ONE larger "
     "document; neighbouring parts intentionally overlap. Analyze ONLY this part "

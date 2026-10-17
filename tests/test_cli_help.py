@@ -79,3 +79,23 @@ def test_the_repo_itself_is_clean(capsys):
 
     assert guard.main([]) == 0
     assert "clean" in capsys.readouterr().out
+
+
+# ------------------------------------------------- one length policy, every surface
+def test_the_length_policy_is_one_text_on_every_surface(capsys):
+    """The owner's rule: MCP and CLI must not differ in capability or in context. A
+    policy stated twice drifts — the MCP instructions said "answer in 3-5 sentences"
+    while the CLI said nothing at all. Both now quote one canonical string, so this
+    fails the moment either surface paraphrases it.
+    """
+    from gemini_mcp.prompts import BREVITY_RULE
+    from gemini_mcp.server import INSTRUCTIONS
+
+    assert BREVITY_RULE in INSTRUCTIONS, "MCP instructions lost the canonical rule"
+
+    for cmd in ("ask", "analyze"):
+        with pytest.raises(SystemExit) as e:
+            main([cmd, "--help"])
+        out = capsys.readouterr().out
+        assert e.value.code == 0
+        assert BREVITY_RULE in out, f"`gemini-mcp {cmd} --help` lost the canonical rule"

@@ -17,6 +17,7 @@ from starlette.responses import JSONResponse
 from . import __version__
 from .config import AppCfg
 from .progress import ProgressEmitter
+from .prompts import BREVITY_RULE
 from .tools import (
     Deps,
     _jobbed,
@@ -82,11 +83,7 @@ and run the same chunked pipeline, so nothing is lost by taking that route, and 
 bytes never enter your context. The CLI does this in one step
 (`analyze --body-file <path>`, or the body on stdin).
 
-LENGTH (required): ask Gemini for a SHORT answer by default — say so in words inside
-'task' ("answer in 3-5 sentences", "conclusions only"). Ask for the full treatment
-only when the task actually calls for it. Nothing on the server shortens an answer
-for you: there is no length cap, so an over-long request is returned in full and
-lands in your context. meta.result_chars says how long what you got is.
+LENGTH (required): """ + BREVITY_RULE + """
 
 FILE INGEST: the flow is ticket → upload → analyze_file (the exact steps ride in the
 quota_status and raw_document_inlined payloads). What only this text can say is how to

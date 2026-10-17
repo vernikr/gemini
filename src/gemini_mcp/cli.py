@@ -18,6 +18,7 @@ from . import __version__, ingest
 from .backends import make_routers, resolve_mode
 from .config import AppCfg, load_all
 from .logging_setup import AuditLogger, enforce_audit_size, prune_jsonl, redact, setup_logging
+from .prompts import BREVITY_RULE
 from .tools import Deps
 
 console = Console(stderr=True, highlight=False)   # highlight=False: no auto-underlined
@@ -201,6 +202,8 @@ def _run_doctor(app_cfg: AppCfg, router_cfg, args) -> int:
 
 def _add_compute_flags(p) -> None:
     """One vocabulary for every compute subcommand — not a dialect per command."""
+    p.epilog = "LENGTH (required): " + BREVITY_RULE
+    p.formatter_class = argparse.RawDescriptionHelpFormatter
     p.add_argument("--task", help="what to do with the body (required for analyze)")
     p.add_argument("--prompt", help="the prompt (ask). Prefer --prompt-file or stdin: "
                                     "argv is visible in ps/history and length-limited")
