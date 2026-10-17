@@ -32,82 +32,39 @@ from .tools import (
 )
 
 INSTRUCTIONS = """\
-Gemini gateway for the Google AI Studio FREE tier (Flash models, ~20 requests/day
-each). Two routing profiles ('route' argument of the compute tools):
-- 'optimal' (default): models are tried in empirical availability order, older first
-  (older models are less loaded on the free tier); overflow to flash-lite/gemma is
-  AUTOMATIC when Flash budgets run out.
-- 'best_available': newest-first chain; overflow is strictly opt-in ('off' = HARD STOP
-  on quota exhaustion).
-Do not pin 'model' unless the user asked for one — the chain exists to keep working
-when a model's budget or availability changes, and pinned ids go stale.
-Use analyze_large for massive bodies: it measures tokens, splits into overlapping
-chunks (each marked 'CHUNK N/M'), analyzes them, consolidates, and returns ONLY the
-compact result plus meta (models, spends, quota_after, progress_trace) — your context
-stays clean. thinking_level defaults to 'medium'; wait_for_minute_limits defaults to
-true (the server waits out RPM/TPM windows and reports a countdown via progress).
-On a hard stop you receive a structured quota_exhausted / plan_budget_insufficient
-error with per-model budgets, wait times and reset ETA — then retry later, shrink the
-job, or opt in with overflow='lite'/'lite+gemma'. Call quota_status BEFORE big jobs;
-router_logs shows recent spend.
+Gemini gateway for the Google AI Studio FREE tier (Flash models, ~20 requests/day each).
 
-TIMEOUT-SAFE LONG JOBS: analyze_large/gemini_generate hold the call inline for at most
-wait_seconds (default 25). If the job needs longer, the call returns
-{status:'running', request_id, poll} — the server KEEPS COMPUTING. Then call
-analyze_result(request_id) (each call waits up to its own wait_seconds) until you get
-the final {result, meta}. Never resubmit a running job: quota is already committed.
+BEHAVIOUR POLICY — which tool for a given body, routing profiles, what the user must be
+told, the length rule, and how to handle quota exhaustion and oversized uploads:
+activate the `gemini-mcp` skill. Read the rest of this text only as the mechanics that
+must hold even when the skill is not loaded.
 
-VISIBLE ALERTS (required): relay ⚠️ alongside EACH unrequested flash-lite/gemma
-model appearing anywhere in the answer's `report` (a job may use several models,
-including a stronger one for final consolidation). For any degraded outcome — waits,
-retries, missing chunks, split PDF, cost drift, unexpected weaker model — show ⚠️ and
-explain the reason, not just the symbol. For a failed tool call or an answer that could
-not be produced at all, prefix your user-facing message with ⛔️ and explain the
-recovery step. Never mark a fully successful clean run as an error.
+POLLING (required): analyze_large/gemini_generate hold the call inline for at most
+wait_seconds (default 25). If the job needs longer the call returns
+{status:'running', request_id, poll} and the server KEEPS COMPUTING — then call
+analyze_result(request_id) until you get the final {result, meta}. Never resubmit a
+running job: quota is already committed.
 
-REPORTING (required): every analyze_large/gemini_generate/analyze_file response
-starts with a one-line 'report' field: route · thinking level · final model ·
-requests spent · 'clean run' or rough_edges count (distinct wait/retry/switch
-EPISODES, not a failed-request count). ALWAYS relay that line to the user in chat;
-if rough_edges > 0, say in plain words what happened (provider 503s and retries,
-model fallbacks, minute-limit waits with seconds, failed chunks — details are in
-meta.progress_trace). If the call errored, say so
-plainly with the reset ETA. Never silently swallow retries, waits or fallbacks.
+REPORT LINE (required): every compute response opens with a one-line `report` field.
+Relay it to the user in chat. rough_edges > 0 means something degraded — waits, retries,
+model fallbacks, failed chunks — so say what happened in plain words; the detail is in
+meta.progress_trace. ⚠️ for any degraded or weaker-than-requested outcome, ⛔️ when no
+answer could be produced at all. Never mark a clean run as an error.
 
-LARGE BODIES — which tool: `analyze_large` takes `body` as an argument, so whatever
-you pass it passes through YOUR context on the way. Use it when the text is already
-in your context anyway. When it is not — it sits in a file, or it is long enough that
-inlining it would cost you the window — do NOT paste it: write it to a file and go
-through file_upload_ticket + analyze_file. Text documents are extracted server-side
-and run the same chunked pipeline, so nothing is lost by taking that route, and the
-bytes never enter your context. The CLI does this in one step
-(`analyze --body-file <path>`, or the body on stdin).
+BODY ROUTING: analyze_large takes `body` as an argument, so the text crosses YOUR
+context. Use it when the text is already there; otherwise write it to a file and go
+through file_upload_ticket + analyze_file — text documents are extracted server-side
+into the same chunked pipeline, so nothing is lost and the bytes stay out of context.
 
 LENGTH (required): """ + BREVITY_RULE + """
 
-FILE INGEST: the flow is ticket → upload → analyze_file (the exact steps ride in the
-quota_status and raw_document_inlined payloads). What only this text can say is how to
-move the bytes: ONE command, `curl -T <file> '<upload_url>'` through the :8790 tunnel —
-the signed URL IS the auth — or `scp <file> <scp_path>` without the tunnel. Binaries
-fail fast with ZERO quota spent.
-
-SIZE DISCIPLINE — 20 MB per upload. That is a memory limit, not a policy: the server
-holds the extracted text in RAM while chunking, so an oversized file can push the
-service past its memory allowance and kill every job in flight, not just yours. When
-what you need to send adds up to more, work down this list:
- 1. Shrink it locally — re-save as plain text or Markdown. RTF and DOCX carry markup
-    that often outweighs the words and a .txt/.md export reads just as well. Archives
-    are NOT accepted.
- 2. Split it — several uploads and several analyze_file calls, then combine the
-    answers yourself. Each call is charged separately; say so in your report.
- 3. Only if neither works, ask the user — in this chat, before you act — for explicit
-    permission to exceed the cap. Tell them plainly that the service may be killed
-    mid-job, taking other people's unfinished work with it, and how far over you need
-    to go. If and only if they say yes, retry with override_size_limit=true. Their
-    consent is the only gate: nothing on the server will stop you, so do not treat a
-    vague "sure, try it" about something else as permission for this.
-Do not paste a large file into 'body' to get around this: analyze_large rejects raw
-documents, and a huge paste costs the same memory without the ticket's protections."""
+FILE INGEST: ticket → upload → analyze_file (the exact steps ride in the quota_status
+and raw_document_inlined payloads). How to move the bytes: ONE command,
+`curl -T <file> '<upload_url>'` through the :8790 tunnel — the signed URL IS the auth —
+or `scp <file> <scp_path>` without it. Binaries fail fast with ZERO quota spent.
+20 MB per upload is a MEMORY cap: shrinking, splitting and asking the user for explicit
+consent before override_size_limit=true are all skill policy.
+"""
 
 # ToolError payload code → HTTP status. Quota is the only 429: every other code is a
 # request the client must CHANGE, not retry — answering 429 there sends it into a

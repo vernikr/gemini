@@ -90,12 +90,15 @@ def test_the_length_policy_is_one_text_on_every_surface(capsys):
     """
     from gemini_mcp.prompts import BREVITY_RULE
     from gemini_mcp.server import INSTRUCTIONS
+    from gemini_mcp.skill_cmd import skill_text
 
-    assert BREVITY_RULE in INSTRUCTIONS, "MCP instructions lost the canonical rule"
+    surfaces = {"MCP instructions": INSTRUCTIONS, "skill": skill_text()}
 
     for cmd in ("ask", "analyze"):
         with pytest.raises(SystemExit) as e:
             main([cmd, "--help"])
-        out = capsys.readouterr().out
         assert e.value.code == 0
-        assert BREVITY_RULE in out, f"`gemini-mcp {cmd} --help` lost the canonical rule"
+        surfaces[f"`gemini-mcp {cmd} --help`"] = capsys.readouterr().out
+
+    for name, text in surfaces.items():
+        assert BREVITY_RULE in text, f"{name} lost the canonical length rule"

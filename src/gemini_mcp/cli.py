@@ -452,6 +452,17 @@ def main(argv: list[str] | None = None) -> int:
                    help="keep a key that failed the probe / remove the last key")
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("skill", help="install the agent skill (routing, badges, quota "
+                                     "policy) where the loaders look for it")
+    sp = p.add_subparsers(dest="skill_action")
+    pi = sp.add_parser("install", help="copy the packaged skill into ~/.agents/skills "
+                                       "and ~/.claude/skills")
+    pi.add_argument("--print", dest="print_only", action="store_true",
+                    help="show the plan, change nothing")
+    sp.add_parser("status", help="what is installed where, and whether it is stale")
+    sp.add_parser("uninstall", help="remove only what this command installed")
+    p.set_defaults(skill_action="")            # bare `skill` is a question, not a guess
+
     p = sub.add_parser("ask", help="single-shot completion (MCP gemini_generate). "
                                    "Prompt from --prompt, --prompt-file or stdin")
     _add_compute_flags(p)
@@ -471,6 +482,10 @@ def main(argv: list[str] | None = None) -> int:
         from .keys_cmd import run as run_keys
 
         return run_keys(args)
+    if args.cmd == "skill":                      # file-level: never needs the app config
+        from .skill_cmd import run as run_skill
+
+        return run_skill(args)
     try:
         from .config import parse_keys
         over: dict = {}
