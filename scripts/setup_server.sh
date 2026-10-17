@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# setup_server.sh — idempotent provisioning of gemini-mcp on the VPS. Run AS ROOT on the
+# setup_server.sh — idempotent provisioning of gemini on the VPS. Run AS ROOT on the
 # server (run_remote.sh does this over ssh). Server-spec compliant:
 #   * never touches ufw/iptables, external-service, unrelated-service, sysctl, ports 22/443/20724;
 #   * adds ONLY a loopback daemon 127.0.0.1:8790 + unit with MemoryMax=350M;
@@ -88,46 +88,46 @@ as_app uv pip install --no-cache "mcp[cli]>=1.9" "uvicorn>=0.30" "starlette>=0.3
 as_app uv pip install --no-cache --no-deps "$APP"
 
 # ---- released package via `uv tool` — the binary the systemd unit runs, the one
-# `gemini-mcp smoke` exercises, and the one push-CD re-installs on every release
+# `gemini smoke` exercises, and the one push-CD re-installs on every release
 # (/usr/local/bin/deploy-tools does `uv tool install --force`).
 # The .venv above is the SOURCE fallback: it installs gemini-router from local checkout,
 # so it is the only path that works while a router version is unpublished on PyPI.
 # Do not remove it while router releases stay manual.
 UHOME="$(getent passwd "$APP_USER" | cut -d: -f6)"
-TOOL_BIN="$UHOME/.local/bin/gemini-mcp"
+TOOL_BIN="$UHOME/.local/bin/gemini"
 VER="$(sed -n 's/^version = "\(.*\)"/\1/p' "$APP/pyproject.toml" | head -1)"
-sudo -u "$APP_USER" env HOME="$UHOME" uv tool install --force "gemini-mcp-gateway==$VER" \
+sudo -u "$APP_USER" env HOME="$UHOME" uv tool install --force "vernikr-gemini==$VER" \
   >/dev/null 2>&1 \
-  || sudo -u "$APP_USER" env HOME="$UHOME" uv tool install --force gemini-mcp-gateway \
+  || sudo -u "$APP_USER" env HOME="$UHOME" uv tool install --force vernikr-gemini \
   >/dev/null 2>&1
-[[ -x $TOOL_BIN ]] || { echo "uv tool install gemini-mcp-gateway failed (no $TOOL_BIN)" >&2; exit 1; }
+[[ -x $TOOL_BIN ]] || { echo "uv tool install vernikr-gemini failed (no $TOOL_BIN)" >&2; exit 1; }
 
 # ---- config-home anchor for BARE ssh launches (Freebuff stdio → no EnvironmentFile):
-# ~/.config/gemini-mcp → $APP makes .env/config.yaml/logs identical on every transport.
+# ~/.config/gemini → $APP makes .env/config.yaml/logs identical on every transport.
 # Explicit -L check: `ln -sfn` into an existing dir would nest the link inside it.
 mkdir -p "$UHOME/.config"
-if [[ ! -L "$UHOME/.config/gemini-mcp" ]]; then
-  rm -rf "$UHOME/.config/gemini-mcp"
-  ln -s "$APP" "$UHOME/.config/gemini-mcp"
+if [[ ! -L "$UHOME/.config/gemini" ]]; then
+  rm -rf "$UHOME/.config/gemini"
+  ln -s "$APP" "$UHOME/.config/gemini"
 fi
 
 # ---- push-CD whitelist entry (only when the dispatcher exists on this host) ----
-if [[ -x /usr/local/bin/deploy-tools && ! -f /etc/deploy-tools.d/gemini-mcp.conf ]]; then
-  cat > /etc/deploy-tools.d/gemini-mcp.conf <<CONF
+if [[ -x /usr/local/bin/deploy-tools && ! -f /etc/deploy-tools.d/gemini.conf ]]; then
+  cat > /etc/deploy-tools.d/gemini.conf <<CONF
 INSTALLER=uv
-PKG=gemini-mcp-gateway
-BIN=gemini-mcp
+PKG=vernikr-gemini
+BIN=gemini
 UNIT=gemini-mcp.service
 STATUS_URL=http://127.0.0.1:8790/healthz
 HEALTH_FIELD=version
 CONF
-  echo "created /etc/deploy-tools.d/gemini-mcp.conf (push-CD)"
+  echo "created /etc/deploy-tools.d/gemini.conf (push-CD)"
 fi
 
 # ---- systemd unit (loopback only; no firewall changes needed) ----
 cat > /etc/systemd/system/gemini-mcp.service <<UNIT
 [Unit]
-Description=gemini-mcp — Gemini MCP gateway (loopback HTTP daemon :8790)
+Description=gemini — Gemini MCP gateway (loopback HTTP daemon :8790)
 After=network-online.target
 Wants=network-online.target
 
@@ -154,11 +154,11 @@ systemctl restart gemini-mcp.service
 sleep 2
 systemctl --no-pager status gemini-mcp.service | sed -n '1,5p' || true
 
-# ---- offline sanity (no quota spent; online checks live in `gemini-mcp smoke`) ----
+# ---- offline sanity (no quota spent; online checks live in `gemini smoke`) ----
 if sudo -u "$APP_USER" env HOME="$UHOME" bash -c "set -a; . '$ENVF'; set +a; cd '$APP' && '$TOOL_BIN' doctor --offline"; then
   echo
   echo "SETUP OK. Daemon: http://127.0.0.1:8790 (bearer in $ENVF → GEMINI_MCP_TOKEN)."
-  echo "Next: gemini-mcp smoke   # first real-key run, spends ≤1 RPD"
+  echo "Next: gemini smoke   # first real-key run, spends ≤1 RPD"
 else
   echo
   # 3 = no API keys, which is the only failure this script can cause; anything else
@@ -166,8 +166,8 @@ else
   echo "SETUP INCOMPLETE — doctor failed (output above). Most likely: GEMINI_API_KEYS empty."
   echo "Fix (on the server):"
   echo "  1) echo 'GEMINI_API_KEYS=<key1,key2>' >> $ENVF   # keys from AI Studio"
-  echo "  2) systemctl restart gemini-mcp && systemctl is-active gemini-mcp"
-  echo "  3) gemini-mcp smoke"
+  echo "  2) systemctl restart gemini && systemctl is-active gemini"
+  echo "  3) gemini smoke"
   echo "Note: without keys the daemon restart-loops by design (fail-fast); it recovers"
   echo "      automatically within seconds once keys are in $ENVF."
   exit 1

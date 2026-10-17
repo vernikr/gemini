@@ -1,4 +1,4 @@
-"""`gemini-mcp keys`: the pool file is edited atomically, secrets never print, a dead key is
+"""`gemini keys`: the pool file is edited atomically, secrets never print, a dead key is
 rejected before it is written, and the last key is guarded.
 
 All offline: probes, systemctl and healthz are monkeypatched. The rules pinned here are the
@@ -91,7 +91,7 @@ def test_list_check_points_at_the_removal_command(pool, monkeypatch, capsys):
     rc = run(["keys", "list", "--check", "--env-file", str(pool)])
     out = capsys.readouterr().out
     assert rc == 1
-    assert "1 rejected — remove: gemini-mcp keys remove" in out
+    assert "1 rejected — remove: gemini keys remove" in out
 
 
 def test_list_check_json_reports_the_rejected_ones(pool, monkeypatch, capsys):

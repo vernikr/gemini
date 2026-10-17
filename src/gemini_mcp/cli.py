@@ -1,4 +1,4 @@
-"""gemini-mcp CLI: serve | stdio | quota | calls | logs | prune | doctor | smoke.
+"""gemini CLI: serve | stdio | quota | calls | logs | prune | doctor | smoke.
 Terminal observability (FR-E7) works over SSH against the shared state without
 touching the daemon."""
 from __future__ import annotations
@@ -39,7 +39,7 @@ def _deps(app_cfg: AppCfg, router_cfg) -> Deps:
 def _run_stdio(app_cfg: AppCfg, router_cfg) -> int:
     from .server import build_server
     deps = _deps(app_cfg, router_cfg)
-    deps.logger.info("gemini-mcp %s starting (stdio, backend=%s)",
+    deps.logger.info("gemini %s starting (stdio, backend=%s)",
                      __version__, deps.backend)
     build_server(deps).run(transport="stdio")
     return 0
@@ -58,7 +58,7 @@ def _run_serve(app_cfg: AppCfg, router_cfg, args) -> int:
     app = build_http_app(build_server(deps), app_cfg, token)
     bind = args.bind or app_cfg.server.http_bind
     port = args.port or app_cfg.server.http_port
-    deps.logger.info("gemini-mcp %s serving on http://%s:%d%s",
+    deps.logger.info("gemini %s serving on http://%s:%d%s",
                      __version__, bind, port, app_cfg.server.mcp_path)
     uvicorn.run(app, host=bind, port=port, log_level="warning", access_log=False)
     return 0
@@ -179,12 +179,26 @@ def _run_smoke(app_cfg: AppCfg, router_cfg, args) -> int:
     return 0 if ok else 1
 
 
+def _log_dir_writable(log_dir: Path) -> bool:
+    """Can logs actually be written here?
+
+    `os.access` answers False for a path that does not exist yet, so checking the
+    directory alone reports "logging is broken" on every fresh install — where the
+    directory simply has not been created. Walk up to the nearest existing ancestor:
+    if that is writable, the log dir can be created on first write.
+    """
+    for cand in (log_dir, *log_dir.parents):
+        if cand.exists():
+            return os.access(cand, os.W_OK)
+    return False
+
+
 def _run_doctor(app_cfg: AppCfg, router_cfg, args) -> int:
     rc = cmd_doctor(args, _effective_cfg(app_cfg, router_cfg))
-    console.print(f"[bold]gemini-mcp {__version__}[/bold] "
+    console.print(f"[bold]gemini {__version__}[/bold] "
                   f"(backend={resolve_mode(app_cfg, router_cfg)})")
     log_dir = Path(app_cfg.logging.dir)
-    writable = os.access(log_dir.parent if not log_dir.exists() else log_dir, os.W_OK)
+    writable = _log_dir_writable(log_dir)
     console.print(f"  logs dir: {log_dir} (writable={writable})")
     console.print(f"  http: {app_cfg.server.http_bind}:{app_cfg.server.http_port}"
                   f"{app_cfg.server.mcp_path} · token set="
@@ -252,7 +266,7 @@ def _project_root() -> Path | None:
 
 
 def _bootstrap_env() -> None:
-    """Bare launches (Freebuff → ``ssh root@vps …/gemini-mcp stdio``) start with
+    """Bare launches (Freebuff → ``ssh root@vps …/gemini stdio``) start with
     cwd=$HOME and an empty env: the systemd EnvironmentFile does not apply there.
     Anchor cwd to the project root and load its .env (without overriding already-set
     vars) so keys, config.yaml and logs/ behave identically on every transport."""
@@ -356,27 +370,27 @@ class _FriendlyParser(argparse.ArgumentParser):
                 hint = f"did you mean '{bare[close[0]]}'?"
                 break
         self.print_usage(sys.stderr)
-        sys.stderr.write(f"gemini-mcp: error: {message}\n")
+        sys.stderr.write(f"gemini: error: {message}\n")
         if hint:
             sys.stderr.write(f"  {hint}\n")
-        sys.stderr.write("  run 'gemini-mcp --help' for the command list, "
-                         "'gemini-mcp <command> --help' for one command\n")
+        sys.stderr.write("  run 'gemini --help' for the command list, "
+                         "'gemini <command> --help' for one command\n")
         raise SystemExit(2)
 
 
 def main(argv: list[str] | None = None) -> int:
     _bootstrap_env()
     ap = _FriendlyParser(
-        prog="gemini-mcp",
+        prog="gemini",
         description="Gemini free-tier MCP gateway — one key pool (or one server), shared "
                     "quota, one ledger.",
         epilog="""common commands:
-  gemini-mcp setup                 onboarding wizard (keys + client config)
-  gemini-mcp doctor                keys, chain, limits, live probe — the health check
-  gemini-mcp quota                 what is left, per key×model
-  gemini-mcp keys                  the key pool: fingerprints, where it lives
-  gemini-mcp keys add <key>        add a key: validated, probed free, service restarted
-  gemini-mcp analyze_file          (MCP tool) read a PDF/image/audio file
+  gemini setup                 onboarding wizard (keys + client config)
+  gemini doctor                keys, chain, limits, live probe — the health check
+  gemini quota                 what is left, per key×model
+  gemini keys                  the key pool: fingerprints, where it lives
+  gemini keys add <key>        add a key: validated, probed free, service restarted
+  gemini analyze_file          (MCP tool) read a PDF/image/audio file
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="config.yaml path (or GEMINI_MCP_CONFIG)")
@@ -384,11 +398,11 @@ def main(argv: list[str] | None = None) -> int:
                                    "source; visible in ps/history — prefer --keys-file)")
     ap.add_argument("--keys-file", help="file with key(s): comma/whitespace/newline "
                                         "separated, # comments ok (or GEMINI_MCP_KEYS_FILE)")
-    ap.add_argument("--version", action="version", version=f"gemini-mcp {__version__}")
+    ap.add_argument("--version", action="version", version=f"gemini {__version__}")
     sub = ap.add_subparsers(dest="cmd")
 
     p = sub.add_parser("setup", help="one-shot onboarding: keys+config in "
-                                     "~/.config/gemini-mcp, client snippets")
+                                     "~/.config/gemini, client snippets")
     p.add_argument("--backend", choices=["direct", "router"],
                    help="skip the fleet-vs-simple question")
     p.add_argument("--keys", help="AI Studio keys, comma-separated (non-interactive)")
@@ -473,7 +487,7 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
     if not args.cmd:                              # bare invocation: show the way in
         ap.print_help()
-        print("\nstart here: gemini-mcp setup — or gemini-mcp doctor if this machine is "
+        print("\nstart here: gemini setup — or gemini doctor if this machine is "
               "already set up")
         return 0
     if args.cmd in ("setup", "uninstall"):       # works even with a broken/absent config
@@ -532,10 +546,10 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as e:  # noqa: BLE001 — CLI must never traceback at the user
         console.print(f"[red]error:[/red] {redact(str(e))}")
         if "no API keys" in str(e):
-            console.print("[yellow]fix:[/yellow] run [bold]gemini-mcp setup[/bold] — or "
+            console.print("[yellow]fix:[/yellow] run [bold]gemini setup[/bold] — or "
                           "provide keys via --keys / --keys-file / "
                           "GEMINI_MCP_KEYS_FILE / GEMINI_API_KEYS "
-                          "(e.g. in ~/.config/gemini-mcp/.env)")
+                          "(e.g. in ~/.config/gemini/.env)")
         return 2
     return 2
 

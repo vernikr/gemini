@@ -1,22 +1,22 @@
 # 06 · Consumer guide (no server needed)
 
-gemini-mcp in **direct mode**: your machine → Google AI Studio free tier. No VPS, no
+gemini in **direct mode**: your machine → Google AI Studio free tier. No VPS, no
 router, no daemon — one wizard run, then paste a JSON block into your MCP client.
 
 ## 1. Install & setup (once)
 
-Any of these runs the same core (`gemini-mcp-gateway` on PyPI):
+Any of these runs the same core (`vernikr-gemini` on PyPI):
 
 ```bash
-pnpm dlx @vernikr/gemini-mcp setup      # pnpm-first (npm shim; uv bootstrapped via npx)
-npx -y @vernikr/gemini-mcp setup        # npm/npx equivalent
-uvx --from gemini-mcp-gateway gemini-mcp setup   # pure Python toolchain
+pnpm dlx @vernikr/gemini setup      # pnpm-first (npm shim; uv bootstrapped via npx)
+npx -y @vernikr/gemini setup        # npm/npx equivalent
+uvx --from vernikr-gemini gemini setup   # pure Python toolchain
 ```
 
 The wizard: fleet-vs-simple question (pick **1 Simple**) → key intake — masked paste,
 read from a file, or skip. The hidden-paste path is guarded because toggling tty echo
 can crash macOS Terminal.app; the file option never touches tty modes. Get keys free at
-https://aistudio.google.com/app/apikey — several keys = several times the quota → live listModels probe → writes `~/.config/gemini-mcp/`:
+https://aistudio.google.com/app/apikey — several keys = several times the quota → live listModels probe → writes `~/.config/gemini/`:
 
 | File | Contents |
 |---|---|
@@ -40,11 +40,11 @@ numbered checklist (`steps` + highlighted `verify_prompt` in the report); only i
 fleet auto-deploy can't run (missing host, no git/ssh auth, Windows) it falls back to
 short numbered manual steps. Two wiring forms:
 
-- **After the wizard** (option A): keys already live in `~/.config/gemini-mcp/.env` —
+- **After the wizard** (option A): keys already live in `~/.config/gemini/.env` —
   the block below needs no env.
 - **Without the wizard** (option B, JSON-only): add `"env": {"GEMINI_API_KEYS":
   "AIza…key1,AIza…key2"}` to the server entry — that alone is sufficient; backend
-  auto-resolves to `direct`, logs+ledger still land in `~/.config/gemini-mcp/`
+  auto-resolves to `direct`, logs+ledger still land in `~/.config/gemini/`
   (bare-launch default). Trade-off: keys sit in the client config file, not a 0600 .env.
   More private JSON-only form — point at a keys FILE instead of inlining secrets:
   `"env": {"GEMINI_MCP_KEYS_FILE": "/absolute/path/keys.txt"}`.
@@ -53,8 +53,8 @@ short numbered manual steps. Two wiring forms:
 
 | Source | Example |
 |---|---|
-| CLI argument | `gemini-mcp --keys 'AIza…' stdio` — visible in `ps`/history, last resort |
-| CLI file | `gemini-mcp --keys-file ~/keys.txt stdio` |
+| CLI argument | `gemini --keys 'AIza…' stdio` — visible in `ps`/history, last resort |
+| CLI file | `gemini --keys-file ~/keys.txt stdio` |
 | env → file | `GEMINI_MCP_KEYS_FILE=/abs/path/keys.txt` (client-JSON `env` friendly) |
 | config.yaml | `router:` → `keys_file: ~/keys.txt` |
 | env inline | `GEMINI_API_KEYS=AIza…,AIza…` (`setup`'s `.env`, or client-JSON `env`) |
@@ -65,16 +65,16 @@ Keys-file format: comma/whitespace/newline separated, `#` comments ignored, dedu
 ### Growing or rotating the pool later
 
 ```bash
-gemini-mcp keys                 # where the pool lives + fingerprints (never raw keys)
-gemini-mcp keys add <key>…      # validate → live probe (listModels, free) → write 0600
-gemini-mcp keys remove <n|fp>   # by index or fingerprint; the last key needs --force
+gemini keys                 # where the pool lives + fingerprints (never raw keys)
+gemini keys add <key>…      # validate → live probe (listModels, free) → write 0600
+gemini keys remove <n|fp>   # by index or fingerprint; the last key needs --force
 ```
 
 The command finds the right file by itself — the systemd unit's `EnvironmentFile` on a
 server, the wizard's `.env` on a workstation — and restarts the service when there is one
 (`--no-restart` skips that).
 
-On the VPS the command is on PATH for every shell (`/usr/local/bin/gemini-mcp`); when a
+On the VPS the command is on PATH for every shell (`/usr/local/bin/gemini`); when a
 host says `command not found` while the tool is installed, that shim is the missing piece.
 
 Both key generations work and neither needs a decision from you: classic `AIza…` (Cloud
@@ -85,7 +85,7 @@ with what to do about it, instead of a bare 403. Several keys = several times th
 quota is counted per key × model; the router spreads calls across the pool by remaining
 budget and steps past an exhausted or rejected key on its own.
 
-The gateway auto-discovers `~/.config/gemini-mcp/` — **no other env vars needed**.
+The gateway auto-discovers `~/.config/gemini/` — **no other env vars needed**.
 
 ### Freebuff Desktop — `~/.agents/mcp.json`
 
@@ -94,7 +94,7 @@ The gateway auto-discovers `~/.config/gemini-mcp/` — **no other env vars neede
   "mcpServers": {
     "gemini": {
       "command": "npx",
-      "args": ["-y", "@vernikr/gemini-mcp", "stdio"]
+      "args": ["-y", "@vernikr/gemini", "stdio"]
     }
   }
 }
@@ -109,7 +109,7 @@ The gateway auto-discovers `~/.config/gemini-mcp/` — **no other env vars neede
   "mcpServers": {
     "gemini": {
       "command": "npx",
-      "args": ["-y", "@vernikr/gemini-mcp", "stdio"]
+      "args": ["-y", "@vernikr/gemini", "stdio"]
     }
   }
 }
@@ -122,7 +122,7 @@ The gateway auto-discovers `~/.config/gemini-mcp/` — **no other env vars neede
   "mcpServers": {
     "gemini": {
       "command": "npx",
-      "args": ["-y", "@vernikr/gemini-mcp", "stdio"]
+      "args": ["-y", "@vernikr/gemini", "stdio"]
     }
   }
 }
@@ -135,7 +135,7 @@ The gateway auto-discovers `~/.config/gemini-mcp/` — **no other env vars neede
   "mcpServers": {
     "gemini": {
       "command": "uvx",
-      "args": ["--from", "gemini-mcp-gateway", "gemini-mcp", "stdio"]
+      "args": ["--from", "vernikr-gemini", "gemini", "stdio"]
     }
   }
 }
@@ -149,11 +149,11 @@ one-time uv resolve (~10–20 s), then it's cached.
 The wizard does the whole server side. Answer its questions (or pass flags):
 
 ```bash
-gemini-mcp setup --backend router --vps-host <ip> \
+gemini setup --backend router --vps-host <ip> \
   [--vps-user root] [--projects-dir ~/projects] [--keys 'AIza…' | --keys-file f]
 ```
 
-It clones/updates `vernikr/gemini-mcp` + `vernikr/gemini-router` into the projects
+It clones/updates `vernikr/gemini` + `vernikr/gemini-router` into the projects
 folder (existing clones are `git pull`ed — never re-cloned over), runs
 `scripts/run_remote.sh setup` (rsync + provision + systemd unit, output streamed),
 optionally writes your Gemini keys into the server's `.env` (0600, keys travel over
@@ -169,7 +169,7 @@ The snippet it prints (host already filled in):
   "mcpServers": {
     "gemini": {
       "command": "ssh",
-      "args": ["root@<YOUR_VPS>", "/root/.local/bin/gemini-mcp", "stdio"]
+      "args": ["root@<YOUR_VPS>", "/root/.local/bin/gemini", "stdio"]
     }
   }
 }
@@ -232,7 +232,7 @@ long enough that inlining it would cost the window — must not be pasted into
 the way. Write it to a file and use `file_upload_ticket` + `analyze_file`; text
 documents are extracted server-side and run the same chunked pipeline, so nothing is
 lost and the bytes never enter the context. The CLI takes the same route in one step
-(`gemini-mcp analyze --body-file <path>`, or the body on stdin).
+(`gemini analyze --body-file <path>`, or the body on stdin).
 
 Several files, one answer: repeat ticket + upload for each file, then call
 `analyze_files(task, upload_ids=[…])`. Text documents keep the chunked pipeline each;
@@ -248,7 +248,7 @@ PDFs fitting the full minute budget are not split merely because the window is
 occupied — the router can wait for it. Oversized PDFs are cut server-side by qpdf;
 `meta.file.split` or `meta.files[].split` lists page ranges and the resolution.
 `meta.file.tokens` carries the original measured cost. Install `qpdf` on the machine
-running gemini-mcp to enable page-range cutting (`sudo apt install qpdf` on Ubuntu,
+running gemini to enable page-range cutting (`sudo apt install qpdf` on Ubuntu,
 `brew install qpdf` on macOS); `pdfinfo` (poppler) is required for the page count.
 Without either binary an oversized PDF fails with an explicit ⛔️ recovery hint; files
 that fit still work. Media is processed at `ingest.media_resolution` — default `high` (the
@@ -291,9 +291,9 @@ filename. There is no server-side switch — the user's consent is the gate.
 Terminal (no client needed):
 
 ```bash
-npx -y @vernikr/gemini-mcp doctor    # keys, chain, limits, live probe, local ledger
-npx -y @vernikr/gemini-mcp quota     # per key×model budget table (live, local)
-npx -y @vernikr/gemini-mcp calls -n 20   # local audit tail
+npx -y @vernikr/gemini doctor    # keys, chain, limits, live probe, local ledger
+npx -y @vernikr/gemini quota     # per key×model budget table (live, local)
+npx -y @vernikr/gemini calls -n 20   # local audit tail
 ```
 
 ## 4. Free-tier facts & troubleshooting

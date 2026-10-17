@@ -99,13 +99,13 @@ jobs:
             done
             echo "::error::$name did not serve $V within 10 minutes"; return 1
           }
-          try PyPI uvx --refresh --from "gemini-mcp-gateway==$V" gemini-mcp --version
-          try npm  npx -y "@vernikr/gemini-mcp@$V" --version
+          try PyPI uvx --refresh --from "vernikr-gemini==$V" gemini --version
+          try npm  npx -y "@vernikr/gemini@$V" --version
 
   deploy:
     needs: pypi                             # deploy only what is already on PyPI
     uses: vernikr/browser-agent/.github/workflows/deploy-ssh.yml@main
     with:
-      app: gemini-mcp                       # → /etc/deploy-tools.d/gemini-mcp.conf on the VPS
+      app: gemini                       # → /etc/deploy-tools.d/gemini.conf on the VPS
       tag: ${{ github.ref_name }}
     secrets: inherit                        # DEPLOY_SSH_KEY / DEPLOY_HOST / DEPLOY_USER

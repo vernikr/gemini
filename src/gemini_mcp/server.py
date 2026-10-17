@@ -36,7 +36,7 @@ Gemini gateway for the Google AI Studio FREE tier (Flash models, ~20 requests/da
 
 BEHAVIOUR POLICY — which tool for a given body, routing profiles, what the user must be
 told, the length rule, and how to handle quota exhaustion and oversized uploads:
-activate the `gemini-mcp` skill. Read the rest of this text only as the mechanics that
+activate the `gemini` skill. Read the rest of this text only as the mechanics that
 must hold even when the skill is not loaded.
 
 POLLING (required): analyze_large/gemini_generate hold the call inline for at most
@@ -377,7 +377,7 @@ def build_server(deps: Deps) -> MCPServer:
 
     @srv.custom_route("/healthz", methods=["GET"])
     async def healthz(request: Request) -> JSONResponse:
-        return JSONResponse({"ok": True, "service": "gemini-mcp", "version": __version__,
+        return JSONResponse({"ok": True, "service": "gemini", "version": __version__,
                              "backend": deps.backend})
 
     @srv.custom_route("/v1/quota", methods=["GET"])
@@ -491,7 +491,7 @@ class BearerMiddleware:
                 {"error": "unauthorized",
                  "error_description": "static bearer auth: send 'Authorization: Bearer "
                                       "<GEMINI_MCP_TOKEN>' (no OAuth on this server)"},
-                status_code=401, headers={"WWW-Authenticate": 'Bearer realm="gemini-mcp"'})
+                status_code=401, headers={"WWW-Authenticate": 'Bearer realm="gemini"'})
             await response(scope, receive, send)
             return
         await self.app(scope, receive, send)
@@ -523,7 +523,7 @@ class AuthMetadataRoutes:
                 resp = JSONResponse({
                     "resource": f"http://{host}{self.mcp_path}",
                     "bearer_methods_supported": ["header"],
-                    "resource_documentation": "https://github.com/vernikr/gemini-mcp",
+                    "resource_documentation": "https://github.com/vernikr/gemini",
                     "tls_client_certificate_bound_access_tokens": False})
             else:   # authorization-server meta, DCR /register, /authorize, /token,
                 # OIDC: JSON 404, never text/plain (clients JSON-parse every rung)

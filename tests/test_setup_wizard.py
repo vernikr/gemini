@@ -39,9 +39,9 @@ def test_setup_direct_writes_env_0600_and_config(tmp_path, monkeypatch):
     assert K1 not in blob and K2 not in blob
     sn = rep["snippets"]
     assert sn["paste_now"] is True
-    assert sn["uvx_pinned"]["args"][:2] == ["--from", f"gemini-mcp-gateway=={__version__}"]
+    assert sn["uvx_pinned"]["args"][:2] == ["--from", f"vernikr-gemini=={__version__}"]
     assert sn["pnpm_npx"] == {"command": "npx",
-                              "args": ["-y", "@vernikr/gemini-mcp", "stdio"]}
+                              "args": ["-y", "@vernikr/gemini", "stdio"]}
     assert "claude_desktop" in sn["paste_where"]
 
 
@@ -133,14 +133,14 @@ def test_fleet_auto_deploy_provisions_and_pastes(tmp_path, monkeypatch):
     sn = rep["snippets"]
     assert sn["paste_now"] is True                     # deployed ⇒ paste NOW
     assert sn["ssh"]["args"][0] == "root@YOUR_VPS_HOST"      # real host baked in
-    assert sn["ssh"]["args"][1] == "/root/.local/bin/gemini-mcp"
+    assert sn["ssh"]["args"][1] == "/root/.local/bin/gemini"
     assert not (tmp_path / "gmcp" / ".env").exists()   # no keys at rest locally
 
 
 def test_fleet_skips_provision_when_server_current(tmp_path, monkeypatch):
     _home(tmp_path, monkeypatch)
     proj = tmp_path / "projects"
-    for name in ("gemini-mcp", "gemini-router"):       # existing clones → pull, no
+    for name in ("gemini", "gemini-router"):       # existing clones → pull, no
         (proj / name / ".git").mkdir(parents=True)     # 'already exists' fatal (note 3)
     calls = _fake_sub(monkeypatch, health=[_ok_health()])
     rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST", projects_dir=str(proj),
@@ -155,8 +155,8 @@ def test_fleet_skips_provision_when_server_current(tmp_path, monkeypatch):
 def test_fleet_existing_non_git_dir_readable_error(tmp_path, monkeypatch):
     _home(tmp_path, monkeypatch)
     proj = tmp_path / "projects"
-    (proj / "gemini-mcp").mkdir(parents=True)
-    (proj / "gemini-mcp" / "junk.txt").write_text("x")
+    (proj / "gemini").mkdir(parents=True)
+    (proj / "gemini" / "junk.txt").write_text("x")
     _fake_sub(monkeypatch, health=[])
     rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST", projects_dir=str(proj),
                     probe=False, json_out=True)
@@ -295,7 +295,7 @@ def test_bare_launch_without_keys_points_to_setup(tmp_path, monkeypatch, capsys)
     _home(tmp_path, monkeypatch)
     rc = main(["quota", "--json"])
     err = capsys.readouterr().err
-    assert rc == 2 and "no API keys" in err and "gemini-mcp setup" in err
+    assert rc == 2 and "no API keys" in err and "gemini setup" in err
 
 
 def test_short_path_tilde(tmp_path, monkeypatch):

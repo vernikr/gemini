@@ -19,14 +19,14 @@ def test_a_bare_invocation_is_a_question_and_gets_the_map(capsys):
     rc = main([])
     out = capsys.readouterr().out
     assert rc == 0
-    assert "usage: gemini-mcp" in out and "common commands:" in out
-    assert "gemini-mcp setup" in out and "start here" in out
+    assert "usage: gemini" in out and "common commands:" in out
+    assert "gemini setup" in out and "start here" in out
 
 
 def test_a_mistyped_command_names_the_real_one(capsys):
     code, io = _run(capsys, ["keyz"])
     assert code == 2 and "did you mean 'keys'?" in io.err
-    assert "gemini-mcp --help" in io.err
+    assert "gemini --help" in io.err
 
 
 def test_a_mistyped_subcommand_action_names_the_real_one(capsys):
@@ -42,7 +42,7 @@ def test_a_mistyped_flag_names_the_real_one(capsys):
 
 def test_an_unknown_flag_still_gets_a_way_out(capsys):
     code, io = _run(capsys, ["--tocken", "stdio"])
-    assert code == 2 and "gemini-mcp --help" in io.err
+    assert code == 2 and "gemini --help" in io.err
 
 
 def test_help_lists_the_recently_added_commands(capsys):
@@ -98,7 +98,7 @@ def test_the_length_policy_is_one_text_on_every_surface(capsys):
         with pytest.raises(SystemExit) as e:
             main([cmd, "--help"])
         assert e.value.code == 0
-        surfaces[f"`gemini-mcp {cmd} --help`"] = capsys.readouterr().out
+        surfaces[f"`gemini {cmd} --help`"] = capsys.readouterr().out
 
     for name, text in surfaces.items():
         assert BREVITY_RULE in text, f"{name} lost the canonical length rule"

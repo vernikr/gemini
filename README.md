@@ -1,4 +1,4 @@
-# gemini-mcp
+# gemini
 
 MCP gateway for **massive-payload Gemini analysis on the AI Studio free tier**.
 Runs on a small VPS; a local Freebuff Desktop agent sends huge bodies to it and gets back
@@ -13,7 +13,7 @@ a compact consolidated result — the agent's own context stays clean.
   (`flash-lite → gemma`) when the daily quota is gone; hard stop otherwise; per-request
   wait policy for minute-limit resets (default: wait, countdown reported in progress).
 - Deep progress to the caller (MCP progress + logging notifications + embedded trace),
-  rotating disk logs, `gemini-mcp quota|logs|calls|doctor` in the terminal.
+  rotating disk logs, `gemini quota|logs|calls|doctor` in the terminal.
 - Transports: SSH-stdio (primary) and streamable HTTP daemon (`127.0.0.1`, bearer).
 - **Dual backend**: `router` (fleet: shared SQLite ledger on the VPS) or `direct`
   (plain Google AI Studio: same engine, a local persistent ledger, no server at all).
@@ -23,25 +23,25 @@ a compact consolidated result — the agent's own context stays clean.
 ## Install the agent skill
 
 ```bash
-gemini-mcp skill install        # or: npx -y @vernikr/gemini-mcp skill install
+gemini skill install        # or: npx -y @vernikr/gemini skill install
 ```
 
-Copies the bundled skill into `~/.agents/skills/gemini-mcp` (Codex, Cursor, Copilot,
-Gemini CLI, OpenCode, Freebuff) and `~/.claude/skills/gemini-mcp` (Claude Code). Restart
+Copies the bundled skill into `~/.agents/skills/gemini` (Codex, Cursor, Copilot,
+Gemini CLI, OpenCode, Freebuff) and `~/.claude/skills/gemini` (Claude Code). Restart
 the agent and open a new thread — skills are read when a session starts.
 
 The skill carries the behavioural policy that does not fit in a tool description: which
 tool to use for a given body, routing profiles, the ⚠️/⛔️ badges owed to the user, quota
-handling, and what to do about an oversized upload. `gemini-mcp skill status` reports
+handling, and what to do about an oversized upload. `gemini skill status` reports
 what is installed where and flags a copy that has drifted from the packaged one;
-`gemini-mcp skill uninstall` removes only what `install` wrote.
+`gemini skill uninstall` removes only what `install` wrote.
 
 ## Quick start
 
 ### If you're human
 
 ```bash
-pnpm dlx @vernikr/gemini-mcp setup     # or: uvx --from gemini-mcp-gateway gemini-mcp setup
+pnpm dlx @vernikr/gemini setup     # or: uvx --from vernikr-gemini gemini setup
 ```
 
 Answer the questions: **1 Simple** (direct to Google AI Studio, keys via hidden
@@ -50,8 +50,8 @@ the server, pushes keys, health-checks, all you answer is host + projects folder
 It finishes with a numbered checklist: paste one JSON block into your MCP client
 (Freebuff/Claude Desktop/Cursor — or add `--write-client freebuff|claude|cursor`
 and it merges the block in for you, with a `.bak` backup), restart the client,
-send the agent the printed verify prompt. `gemini-mcp doctor` re-checks
-keys/chain/limits; `gemini-mcp uninstall --yes` removes everything the wizard wrote.
+send the agent the printed verify prompt. `gemini doctor` re-checks
+keys/chain/limits; `gemini uninstall --yes` removes everything the wizard wrote.
 Full client matrix + fleet JSON forms: [`docs/06-consumer.md`](docs/06-consumer.md).
 
 ### If you're an AI agent
@@ -64,19 +64,19 @@ actions: restart the MCP client, then send the agent the prompt from `verify_pro
 
 ```bash
 # direct (no server); keys from a file — never from shell history
-npx -y @vernikr/gemini-mcp setup --backend direct \
+npx -y @vernikr/gemini setup --backend direct \
   --keys-file /abs/path/keys.txt --write-client freebuff --json
 
 # fleet (shared-quota server); clones/provisions/health-checks by itself
-npx -y @vernikr/gemini-mcp setup --backend router --vps-host <ip> \
+npx -y @vernikr/gemini setup --backend router --vps-host <ip> \
   [--vps-user root] [--projects-dir ~/projects] [--keys-file /abs/path/keys.txt] \
   --write-client freebuff --json
 ```
 
 Fleet prerequisites (each failure message tells you how to check): GitHub auth for
-the private repos (`git ls-remote https://github.com/vernikr/gemini-mcp`), passwordless
+the private repos (`git ls-remote https://github.com/vernikr/gemini`), passwordless
 `ssh <user>@<ip>`, bash+rsync, macOS/Linux. No env vars needed afterwards: the gateway
-auto-discovers `~/.config/gemini-mcp/`.
+auto-discovers `~/.config/gemini/`.
 
 Analyzing a FILE (agent): never read it yourself and never inline its contents into a
 prompt. Call `file_upload_ticket(filename, size_bytes)` → HTTP PUT the raw bytes to
@@ -87,11 +87,11 @@ recipe in its `file_flow` field, and raw RTF/PDF/DOCX payloads in text tools fai
 with a `raw_document_inlined` fix.
 
 Direct mode needs nothing but API keys. Usage is tracked in a LOCAL persistent ledger
-(`~/.config/gemini-mcp/state.db`): quota counters survive restarts and are shared by all
+(`~/.config/gemini/state.db`): quota counters survive restarts and are shared by all
 gateway processes on the machine — but not across machines (that's fleet mode: VPS
 daemon + `backend: router`). Every response says `backend=direct` in its `report` line;
-`gemini-mcp uninstall --yes` removes keys, config and ledger together. The npm shim
-`@vernikr/gemini-mcp` (pnpm-first install) ships the same core at the same version.
+`gemini uninstall --yes` removes keys, config and ledger together. The npm shim
+`@vernikr/gemini` (pnpm-first install) ships the same core at the same version.
 
 ## Development
 
@@ -101,7 +101,7 @@ uv sync --extra dev    # dev pin: gemini-router from a git tag (tool.uv.sources)
 uv run pytest -q       # chunker, pipeline, tools/server, logging, backends, wizard —
                        # all faked, no network
 uv run ruff check src tests
-GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor|smoke
+GEMINI_API_KEYS=... uv run gemini setup|quota|calls|logs|prune|doctor|smoke
 ```
 
 | Stage | Artifact |
@@ -120,7 +120,7 @@ GEMINI_API_KEYS=... uv run gemini-mcp setup|quota|calls|logs|prune|doctor|smoke
 { "mcpServers": {
     "gemini": {                       // A) SSH-stdio — primary, encrypted, no open ports
       "command": "ssh",
-      "args": ["root@YOUR_VPS_HOST", "~/.local/bin/gemini-mcp", "stdio"] },
+      "args": ["root@YOUR_VPS_HOST", "~/.local/bin/gemini", "stdio"] },
     "gemini-http": {                  // B) HTTP via `ssh -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST`
       "type": "http", "url": "http://127.0.0.1:8790/mcp",
       "headers": { "Authorization": "Bearer $GEMINI_MCP_TOKEN" } } } }
@@ -151,14 +151,14 @@ Freebuff Desktop wiring (SSH-stdio and HTTP-via-tunnel snippets, verification st
 
 ```bash
 ssh root@YOUR_VPS_HOST
-sudo systemctl status gemini-mcp          # daemon (HTTP)
-~/.local/bin/gemini-mcp quota    # what's left, per key×model (on the VPS, as its user)
-~/.local/bin/gemini-mcp logs -f  # live app log
-~/.local/bin/gemini-mcp keys    # the key pool: fingerprints, where it lives
-gemini-mcp keys add <key>       # add a key: validated, probed free, service restarted
+sudo systemctl status gemini          # daemon (HTTP)
+~/.local/bin/gemini quota    # what's left, per key×model (on the VPS, as its user)
+~/.local/bin/gemini logs -f  # live app log
+~/.local/bin/gemini keys    # the key pool: fingerprints, where it lives
+gemini keys add <key>       # add a key: validated, probed free, service restarted
 ```
 
-`gemini-mcp keys` edits the env file the daemon actually reads (the unit's
+`gemini keys` edits the env file the daemon actually reads (the unit's
 `EnvironmentFile`) and restarts the service — the same command works on a workstation,
 where it writes the wizard's `.env` instead.
 

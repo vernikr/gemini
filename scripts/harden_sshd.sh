@@ -10,7 +10,7 @@ test -s /root/.ssh/authorized_keys || {
 
 mkdir -p /etc/ssh/sshd_config.d
 cat > /etc/ssh/sshd_config.d/90-gemini-hardening.conf <<'EOF'
-# gemini-mcp M5: key-only root login, no password brute-force surface
+# gemini M5: key-only root login, no password brute-force surface
 PermitRootLogin prohibit-password
 PasswordAuthentication no
 KbdInteractiveAuthentication no

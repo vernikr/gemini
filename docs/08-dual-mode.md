@@ -12,7 +12,7 @@ fleet-specific part is the **ledger** (shared SQLite = quota truth across client
 
 So `direct` mode is not a second client — it is the same `Router` engine, differing only
 in WHERE its ledger lives: `direct` persists to a LOCAL SQLite ledger under the config
-home (`~/.config/gemini-mcp/state.db`), so usage survives restarts and is coherent
+home (`~/.config/gemini/state.db`), so usage survives restarts and is coherent
 across every gateway process on the machine (Freebuff + Claude Desktop running at once).
 It is still per-machine: cross-machine truth is what fleet/router mode exists for.
 `MemLedger` (`src/gemini_mcp/backends.py`, same method contracts and row shapes as the
@@ -33,10 +33,10 @@ make_routers(): → (router, router_optimal, mode); direct mode points BOTH inst
 | Aspect | router (fleet) | direct (consumer) |
 |---|---|---|
 | Quota truth | shared SQLite ledger, all clients/machines | local SQLite ledger — accurate on this machine, not shared across machines |
-| Disk state | VPS `state.db` (calls, cache, cooldowns) | `~/.config/gemini-mcp/state.db` (+ logs under the same home); removed by `uninstall` |
+| Disk state | VPS `state.db` (calls, cache, cooldowns) | `~/.config/gemini/state.db` (+ logs under the same home); removed by `uninstall` |
 | Cache / idempotency | survives restarts (24h TTL) | same — survives restarts (local file) |
-| `gemini-mcp calls` | persistent audit tail | persistent LOCAL audit tail (live rows) |
-| `gemini-mcp quota` | live shared table | live local table + ledger path note |
+| `gemini calls` | persistent audit tail | persistent LOCAL audit tail (live rows) |
+| `gemini quota` | live shared table | live local table + ledger path note |
 | `prune` / `doctor` | full (SQLite) | full (local SQLite); doctor prints local state stats + listModels probe |
 | Multi-client fairness | enforced across machines | enforced across processes on ONE machine |
 
@@ -56,7 +56,7 @@ make_routers(): → (router, router_optimal, mode); direct mode points BOTH inst
 
 Direct mode reads keys through the existing `RouterConfig.load()` plumbing:
 `GEMINI_API_KEYS` / `GEMINI_API_KEY_1..10` env (wizard writes them to
-`~/.config/gemini-mcp/.env`). Also: `--keys` / `--keys-file` global CLI
+`~/.config/gemini/.env`). Also: `--keys` / `--keys-file` global CLI
 flags, `GEMINI_MCP_KEYS_FILE` env, and `router.keys_file` in config.yaml (precedence
 in that order, file format: comma/whitespace/newline + `#` comments) — see
 docs/06-consumer.md. No other new key surface — deliberate.

@@ -113,3 +113,18 @@ def test_doctor_exit_codes_pass_through(tmp_path, monkeypatch):
     rc = main(["--config", str(cfg), "doctor", "--offline"])
     ro.chmod(0o755)                                    # let tmp_path clean up
     assert rc == 6                                     # log dir unwritable
+
+
+def test_doctor_does_not_cry_wolf_on_a_fresh_install(tmp_path, monkeypatch, capsys):
+    """A first run has no logs/ directory yet — that is not a failure. The old check
+    called os.access on a path that did not exist, got False, and reported logging as
+    broken with exit 6, so `gemini doctor` failed on every clean machine."""
+    _home(tmp_path, monkeypatch)
+    monkeypatch.setenv("GEMINI_MCP_BACKEND", "direct")
+    monkeypatch.setenv("GEMINI_API_KEYS", "AIzaSyDUMMYdummy1234567890ab")
+
+    log_dir = tmp_path / "gmcp" / "logs"
+    assert not log_dir.exists(), "the premise is a directory that is not there yet"
+
+    assert main(["doctor", "--offline"]) == 0
+    assert "writable=True" in capsys.readouterr().err

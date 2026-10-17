@@ -9,7 +9,7 @@
 #   bash scripts/run_remote.sh logs     # tail daemon journal + app.log
 #
 # NOTE (0.10.0+): the systemd unit runs the RELEASED package via `uv tool`
-# (~/.local/bin/gemini-mcp) — VERSION upgrades flow through push-CD (git tag →
+# (~/.local/bin/gemini) — VERSION upgrades flow through push-CD (git tag →
 # release.yml deploy job → deploy-tools). setup/deploy here sync SOURCE + config
 # (config.yaml, scripts, prompts) and keep the tool binary at the latest release.
 #
@@ -23,7 +23,7 @@ VPS_USER="${VPS_USER:-root}"
 APP_USER="${APP_USER:-$VPS_USER}"
 VPS_HOST="${VPS_HOST:-YOUR_VPS_HOST}"
 DEST="$VPS_USER@$VPS_HOST"
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # gemini-mcp repo
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # gemini repo
 ROUTER_LOCAL="$(dirname "$HERE")/gemini-router"                  # sibling checkout
 # NOTE: --rsync-path="sudo rsync" needs passwordless sudo for the login user (root: OK).
 # The remote .env is NEVER touched (--exclude .env).
@@ -38,7 +38,7 @@ sync_both() {
   echo "→ rsync gemini-router → /opt/apps/gemini-router"
   rsync -az --delete "${EXCL[@]}" --rsync-path="sudo rsync" -e ssh \
     "$ROUTER_LOCAL/" "$DEST:/opt/apps/gemini-router/"
-  echo "→ rsync gemini-mcp → /opt/apps/gemini-mcp"
+  echo "→ rsync gemini → /opt/apps/gemini-mcp"
   rsync -az --delete "${EXCL[@]}" --rsync-path="sudo rsync" -e ssh \
     "$HERE/" "$DEST:/opt/apps/gemini-mcp/"
 }
@@ -49,16 +49,16 @@ case "$cmd" in
     ssh -t "$DEST" "sudo APP_USER=$APP_USER bash /opt/apps/gemini-mcp/scripts/setup_server.sh"
     ;;
   smoke)
-    ssh -t "$DEST" "sudo -u $APP_USER /home/$APP_USER/.local/bin/gemini-mcp smoke"
+    ssh -t "$DEST" "sudo -u $APP_USER /home/$APP_USER/.local/bin/gemini smoke"
     ;;
   status)
     ssh -t "$DEST" "systemctl --no-pager status gemini-mcp.service | head -8; \
       sudo -u $APP_USER env HOME=\$(getent passwd $APP_USER | cut -d: -f6) bash -c \
       'set -a; . /opt/apps/gemini-mcp/.env; set +a; cd /opt/apps/gemini-mcp && \
-      \"\$HOME/.local/bin/gemini-mcp\" quota'"
+      \"\$HOME/.local/bin/gemini\" quota'"
     ;;
   logs)
-    ssh -t "$DEST" "sudo journalctl -u gemini-mcp -n 40 --no-pager; \
+    ssh -t "$DEST" "sudo journalctl -u gemini -n 40 --no-pager; \
       echo ---; tail -n 30 /opt/apps/gemini-mcp/logs/app.log 2>/dev/null || true"
     ;;
   *)

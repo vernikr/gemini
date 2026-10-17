@@ -1,7 +1,7 @@
 """Dual-mode backends. 'router' = fleet mode: shared SQLite ledger (VPS daemon + SSH
 stdio — quota truth shared by every client). 'direct' = plain Google AI Studio: the SAME
 Router engine, REST protocol and error vocabulary, with a LOCAL persistent ledger under
-the config home (~/.config/gemini-mcp/state.db) — no server, counters survive restarts
+the config home (~/.config/gemini/state.db) — no server, counters survive restarts
 and are shared by all gateway processes on this machine.
 
 Mode: `backend: auto|direct|router` in config.yaml or GEMINI_MCP_BACKEND. auto → 'router'

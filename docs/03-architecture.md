@@ -9,7 +9,7 @@ Freebuff Desktop (macOS/Windows)                     VPS YOUR_VPS_HOST (Ubuntu 2
 ┌──────────────────────────────┐                    ┌───────────────────────────────────────────┐
 │ ~/.agents/mcp.json           │                    │  systemd: gemini-mcp.service (MemoryMax=350M)│
 │  A) stdio: ssh root@vps ────┼──── SSH (22) ─────►│  ┌─────────────────────────────────────┐  │
-│  B) http: 127.0.0.1:8790 ────┼── ssh -L tunnel ──►│  │ gemini-mcp daemon (FastMCP/uvicorn) │  │
+│  B) http: 127.0.0.1:8790 ────┼── ssh -L tunnel ──►│  │ gemini daemon (FastMCP/uvicorn) │  │
 │     (Bearer $GEMINI_MCP_TOKEN)│   (or future CF)   │  │  MCP: /mcp (streamable HTTP)        │  │
 └──────────────────────────────┘                    │  │  REST: /v1/quota /v1/complete       │  │
                                                     │  │  pipeline: chunker→analyzer→consol. │  │
@@ -74,11 +74,11 @@ Inherited from `external-consumer/src/llm.py` (extract, don't rewrite): status t
 (`RETRYABLE_STATUS`, `MODEL_SWITCH_STATUS`), `Retry-After` parsing, `extract_json`,
 `listModels` validation + `_best_available`, backoff with jitter and provider deadline.
 
-### 2.2 `gemini-mcp` — gateway & pipeline
+### 2.2 `gemini` — gateway & pipeline
 
 ```
-gemini-mcp/
-├── pyproject.toml            # deps: mcp[cli], gemini-router @ git tag, rich; console: gemini-mcp
+gemini/
+├── pyproject.toml            # deps: mcp[cli], gemini-router @ git tag, rich; console: gemini
 ├── config.yaml               # all tunables (limits, chain, chunking, retention, thinking default)
 ├── .env.example              # GEMINI_API_KEYS, GEMINI_MCP_TOKEN, GEMINI_ROUTER_STATE, …
 ├── src/gemini_mcp/
@@ -89,7 +89,7 @@ gemini-mcp/
 │   ├── prompts.py            # chunk service marker, consolidation & recursive-consolidation templates
 │   ├── progress.py           # RouterEvent+pipeline stages → report_progress / ctx.info / trace
 │   ├── logging_setup.py      # rich console + RotatingFileHandler + JSONL audit + redaction + retention
-│   └── cli.py                # gemini-mcp serve|stdio|quota|calls|logs|prune|doctor
+│   └── cli.py                # gemini serve|stdio|quota|calls|logs|prune|doctor
 │                             # (REST /v1/* + /healthz live in server.py custom routes)
 ├── scripts/                  # setup_server.sh (idempotent), run_remote.sh (rsync deploy), gen_token.sh
 ├── tests/                    # pipeline & chunker units (fake token counter), MCP e2e via in-memory client
@@ -185,10 +185,10 @@ blocking and without subscribing to progress notifications.
 | Request dumps | `logs/requests-YYYY-MM-DD.jsonl` | one JSON/line: request_id, tool, params hash, sizes, stages, spends, errors; bodies only if `dump_bodies` | delete files > `jsonl_keep_days`(14); startup + daily task |
 | Redaction | logging filter | API keys → `key_id`, bearer → `***`, emails/long tokens masked | always on |
 
-Terminal UX (over SSH, no daemon stop): `gemini-mcp quota` (rich table: model × key,
-RPD left bar, RPM/TPM window, cooldown ETA, recommended next), `gemini-mcp logs -f`
-(tail app.log; `--json` for JSONL), `gemini-mcp calls -n 50 --status quota`,
-`gemini-mcp doctor` (config, state path writable, key validity via listModels, clock/PT
+Terminal UX (over SSH, no daemon stop): `gemini quota` (rich table: model × key,
+RPD left bar, RPM/TPM window, cooldown ETA, recommended next), `gemini logs -f`
+(tail app.log; `--json` for JSONL), `gemini calls -n 50 --status quota`,
+`gemini doctor` (config, state path writable, key validity via listModels, clock/PT
 offset, RAM). Same tables exposed by MCP `quota_status`/`router_logs` and REST `/v1/quota`.
 
 ## 6. Deployment topology (VPS)
@@ -200,11 +200,11 @@ offset, RAM). Same tables exposed by MCP `quota_status`/`router_logs` and REST `
 ├── config.yaml · src/ · scripts/ · prompts inline
 └── logs/                      # app.log*, requests-*.jsonl
 /opt/apps/shared/gemini-router/state.db   # GEMINI_ROUTER_STATE (dir chmod 770, db 660)
-/etc/systemd/system/gemini-mcp.service    # ExecStart=~/.local/bin/gemini-mcp serve
+/etc/systemd/system/gemini-mcp.service    # ExecStart=~/.local/bin/gemini serve
                                           # MemoryMax=350M, Restart=on-failure, EnvironmentFile=.env
 ```
 
-- Stdio sessions (path A): `ssh root@YOUR_VPS_HOST '~/.local/bin/gemini-mcp stdio'`
+- Stdio sessions (path A): `ssh root@YOUR_VPS_HOST '~/.local/bin/gemini stdio'`
   — no unit needed; optional sshd slice drop-in caps session RAM (documented, off by default).
 - Ports: only `127.0.0.1:8790` (daemon). **No ufw changes** (loopback isn't filtered);
   443/20724/22 untouched; external-service untouched.
@@ -350,7 +350,7 @@ Flow:
    deleted after the job; group answers and per-file answers use recursive fan-in.
 4. Retention (FR-E9): blobs, sidecars and spent-ticket markers age out at `keep_hours`,
    the total is capped by `total_cap_mb` (oldest first); prune runs on ticket issuance,
-   at the start of every `analyze_file` and on demand via `gemini-mcp prune`, so an
+   at the start of every `analyze_file` and on demand via `gemini prune`, so an
    inbox nobody asks tickets from still empties. A blob that has been analyzed stays
    until `keep_hours` — re-analyzing the same `upload_id` is a supported second call,
    and the spent ticket cannot be replayed regardless. The per-file cap is a memory

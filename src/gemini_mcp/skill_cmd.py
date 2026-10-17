@@ -2,7 +2,7 @@
 
 Why this lives in the package rather than in a shell script in the repo: the skill has to
 survive "return in a month, install on a new machine". A script you must clone first does
-not; `gemini-mcp skill install` does, because it ships inside the wheel next to the file
+not; `gemini skill install` does, because it ships inside the wheel next to the file
 it copies.
 
 Mechanics follow the pattern the research-workspace skills proved out — a manifest of what
@@ -14,8 +14,11 @@ import shutil
 from importlib import resources
 from pathlib import Path
 
-SKILL_NAME = "gemini-mcp"
+SKILL_NAME = "gemini"
+# The manifest FILENAME is on-disk state, not branding: renaming it would orphan the
+# uninstall record of every existing install. What it RECORDS is what changed.
 MANIFEST = ".gemini-mcp-skill.manifest"
+LEGACY_NAMES = ("gemini-mcp",)   # shipped under this name before the rename
 
 # Loader order, later overriding earlier. ~/.agents/skills is the interoperable one
 # (Codex, Cursor, Copilot, Gemini CLI, OpenCode, Freebuff); ~/.claude/skills is the only
@@ -41,8 +44,37 @@ def skill_text() -> str:
     return raw.replace(_PLACEHOLDER, BREVITY_RULE)
 
 
+def _retire_legacy(dir_: Path) -> None:
+    """Remove skill dirs an earlier version of this command installed under an old name.
+
+    Without this the rename leaves the previous skill on disk beside the new one and the
+    loader picks up both, so a stale copy keeps teaching last release's policy.
+    """
+    manifest = dir_ / MANIFEST
+    recorded = manifest.read_text("utf-8").split() if manifest.is_file() else []
+    for name in dict.fromkeys((*recorded, *LEGACY_NAMES)):
+        if name == SKILL_NAME:
+            continue
+        target = dir_ / name
+        if target.is_dir():
+            shutil.rmtree(target)
+            print(f"removed superseded {target}")
+
+
+def _owned(dir_: Path) -> list[str]:
+    """Names this command put in `dir_`, per the manifest.
+
+    The manifest, not SKILL_NAME, is the authority: after a rename the recorded name is
+    the old one, and keying off today's constant would strand that directory forever.
+    """
+    manifest = dir_ / MANIFEST
+    if not manifest.is_file():
+        return []
+    return [n for n in manifest.read_text("utf-8").split() if (dir_ / n / "SKILL.md").is_file()]
+
+
 def _installed(dir_: Path) -> bool:
-    return (dir_ / MANIFEST).is_file() and (dir_ / SKILL_NAME / "SKILL.md").is_file()
+    return bool(_owned(dir_))
 
 
 def _write_manifest(dir_: Path) -> None:
@@ -57,6 +89,7 @@ def install(*, print_only: bool = False) -> int:
             print(f"would write {dest}/SKILL.md ({len(body)} chars)")
             continue
         dir_.mkdir(parents=True, exist_ok=True)
+        _retire_legacy(dir_)
         if dest.exists():
             shutil.rmtree(dest)          # a stale copy must not survive an upgrade
         dest.mkdir(parents=True)
@@ -66,7 +99,7 @@ def install(*, print_only: bool = False) -> int:
     if print_only:
         return 0
     print("\nDesktop agents read skills when a session starts: restart the app and open "
-          "a new thread.\nCheck with: gemini-mcp skill status")
+          "a new thread.\nCheck with: gemini skill status")
     return 0
 
 

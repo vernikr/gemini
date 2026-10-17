@@ -1,4 +1,4 @@
-"""`gemini-mcp smoke`: the free steps run, and it spends exactly one call."""
+"""`gemini smoke`: the free steps run, and it spends exactly one call."""
 from __future__ import annotations
 
 from types import SimpleNamespace

@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- Local :8790 -> VPS :8790 tunnel for gemini-mcp HTTP path.
+<!-- Local :8790 -> VPS :8790 tunnel for gemini HTTP path.
      Install: cp scripts/gemini-tunnel.plist ~/Library/LaunchAgents/com.vernikr.gemini-tunnel.plist
               launchctl load ~/Library/LaunchAgents/com.vernikr.gemini-tunnel.plist
      launchd keeps it alive (restart on death, after sleep, at login). -->

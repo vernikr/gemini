@@ -1,10 +1,10 @@
-# gemini-mcp default config (docs/03-architecture.md §8).
+# gemini default config (docs/03-architecture.md §8).
 # Secrets live in .env only: GEMINI_API_KEYS, GEMINI_MCP_TOKEN, GEMINI_ROUTER_STATE.
 
 backend: router            # fleet pin (docs/08): this config deploys to the VPS —
                            # shared ledger truth; auto-detect would agree (state.db
                            # exists) but pinning removes the heuristic. Consumer
-                           # machines get `backend: direct` from `gemini-mcp setup`.
+                           # machines get `backend: direct` from `gemini setup`.
 
 router:
   # 'best_available' route chain (newest-first, overflow opt-in only)

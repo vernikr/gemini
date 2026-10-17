@@ -1,4 +1,4 @@
-# AGENTS.md — gemini-mcp
+# AGENTS.md — gemini
 
 Follow the owner's global AGENTS.md (English in files, Russian in chat, PM-style reports,
 Conventional Commits, SemVer, push after every successful step, docs updated with
@@ -18,10 +18,10 @@ functional changes, blockers in `docs/blockers/`). Repo-specific rules:
 
 ## Commands
 - `uv sync` · `uv run pytest` · `uv run ruff check src tests`
-- `uv run gemini-mcp stdio` / `serve [--bind --port]` / `setup` / `uninstall` /
+- `uv run gemini stdio` / `serve [--bind --port]` / `setup` / `uninstall` /
   `quota` / `calls` / `logs [-f]` / `prune` / `doctor`
 - Deploy (user's workstation): `bash scripts/run_remote.sh setup|deploy|smoke|status|logs`
-- On the VPS the daemon runs the `uv tool` binary `~/.local/bin/gemini-mcp`, NOT a
+- On the VPS the daemon runs the `uv tool` binary `~/.local/bin/gemini`, NOT a
   project `.venv` — docs and client snippets must use that path.
 
 ## Secrets
@@ -32,7 +32,7 @@ functional changes, blockers in `docs/blockers/`). Repo-specific rules:
 ## Testing
 - No network in CI: respx mocks reproduce the provider's 429/5xx payload shapes.
   Real API only via
-  `gemini-mcp smoke` on the server (budget: ≤1 RPD per run).
+  `gemini smoke` on the server (budget: ≤1 RPD per run).
 - Every FR-x from `docs/02` maps to a test; keep the mapping in test docstrings.
 
 ## Docs

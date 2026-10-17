@@ -1,9 +1,9 @@
 {
-  "name": "@vernikr/gemini-mcp",
-  "version": "0.25.1",
-  "description": "One-command Gemini free-tier MCP gateway: quota-aware model routing, massive-body chunked analysis, file ingest \u2014 text extracted server-side, PDFs/images/audio read by the provider Files API \u2014 async tickets. Thin bootstrap for the Python core gemini-mcp-gateway.",
+  "name": "@vernikr/gemini",
+  "version": "0.26.0",
+  "description": "One-command Gemini free-tier MCP gateway: quota-aware model routing, massive-body chunked analysis, file ingest \u2014 text extracted server-side, PDFs/images/audio read by the provider Files API \u2014 async tickets. Thin bootstrap for the Python core vernikr-gemini.",
   "bin": {
-    "gemini-mcp": "bin/gemini-mcp.js"
+    "gemini": "bin/gemini.js"
   },
   "files": [
     "bin"
@@ -14,7 +14,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vernikr/gemini-mcp.git"
+    "url": "git+https://github.com/vernikr/gemini.git"
   },
   "publishConfig": {
     "access": "public"

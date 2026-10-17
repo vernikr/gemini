@@ -154,7 +154,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   so the caller can decide. **Daily RPD resets are never waited on** (hours-scale) —
   hard stop / overflow per FR-C8 applies.
 
-## D. Chunking pipeline (gemini-mcp)
+## D. Chunking pipeline (gemini)
 
 - **FR-D1** MUST measure the body with `countTokens`; if ≤ `chunk_threshold_tokens` →
   single-shot path (FR-B2 semantics).
@@ -199,8 +199,8 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   (full request/response dumps only when `dump_bodies: true`; default: sizes+hashes).
 - **FR-E6** Retention/eviction: JSONL older than `jsonl_keep_days` deleted; audit rows
   beyond `audit_keep_days`/`audit_max_mb` pruned; app.log rotated; on startup and daily.
-- **FR-E7** Terminal access: `gemini-mcp logs [-f] [--json]`, `gemini-mcp quota`,
-  `gemini-mcp calls [--model m] [--status s] [-n 50]` — work over SSH against the
+- **FR-E7** Terminal access: `gemini logs [-f] [--json]`, `gemini quota`,
+  `gemini calls [--model m] [--status s] [-n 50]` — work over SSH against the
   server state without stopping the daemon.
 - **FR-E8** Secrets: API keys and bearer token MUST never appear in any log/audit/error
   (masked `key_id`, token redacted); bodies are not logged by default.
@@ -209,7 +209,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   replay inside the TTL is refused even after the file is pruned or evicted. Blobs,
   sidecars and spent markers age out at `ingest.keep_hours`, capped by
   `ingest.total_cap_mb` (oldest first), pruned when a ticket is issued, at the start of
-  every `analyze_file` and on demand via `gemini-mcp prune`.
+  every `analyze_file` and on demand via `gemini prune`.
 - **FR-E10** A running-job ticket MUST say what the job is doing: `live` carries the
   current `phase` (canonical from router events and gateway stages: `generating`,
   `waiting_rpm`/`waiting_tpm`, `chunking`, `consolidating`, …), `eta_s` while a quota
@@ -239,7 +239,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   chain order, thinking default, chunking, retention, overflow tiers configurable
   without code edits; config validated at startup with clear errors (pydantic).
 - **FR-F7** Conventional Commits + SemVer; CI (GitHub Actions, free tier): lint + tests
-  on push; router tagged releases consumed by gemini-mcp via git dependency.
+  on push; router tagged releases consumed by gemini via git dependency.
 - **FR-F8** Timezone: quota day = America/Los_Angeles; all logs store UTC + PT where relevant.
 
 ## G. Acceptance scenarios (v1.0 gate)
@@ -256,7 +256,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 5. **Coexistence**: daemon + a parallel `gemini-router` CLI call → both see one budget,
    no double-spend (WAL).
 6. **Restart**: kill daemon mid-day → counters intact from ledger.
-7. **Ops**: `gemini-mcp quota` / `logs -f` over SSH work while the daemon runs; JSONL
+7. **Ops**: `gemini quota` / `logs -f` over SSH work while the daemon runs; JSONL
    pruning removes files older than retention.
 8. **Wait policy**: model gated by RPM → `wait_for_minute_limits=true`: request waits,
    agent sees countdown ("waiting 42s for gemini-3.8-flash RPM window"), then succeeds;

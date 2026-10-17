@@ -1,6 +1,6 @@
 [project]
-name = "gemini-mcp-gateway"   # PyPI dist name (gemini-mcp taken); CLI bin stays gemini-mcp
-version = "0.25.1"
+name = "vernikr-gemini"   # PyPI dist name (gemini taken); CLI bin stays gemini
+version = "0.26.0"
 description = "MCP gateway for massive-payload Gemini analysis on the AI Studio free tier: chunking with overlap, consolidation, thinking_level control, deep progress, rotating disk logs"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -25,7 +25,7 @@ dev = [
 ]
 
 [project.scripts]
-gemini-mcp = "gemini_mcp.cli:main"
+gemini = "gemini_mcp.cli:main"
 
 [build-system]
 requires = ["hatchling"]

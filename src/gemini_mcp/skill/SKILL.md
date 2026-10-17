@@ -1,9 +1,9 @@
 ---
-name: gemini-mcp
-description: Use when analysing documents or asking Gemini through the gemini-mcp gateway or CLI — picking between analyze_large, analyze_file and the file-upload ticket, reading the report line, relaying ⚠️ and ⛔️ badges to the user, handling free-tier quota exhaustion, and staying inside the 20 MB upload limit.
+name: gemini
+description: Use when analysing documents or asking Gemini through the gemini gateway or CLI — picking between analyze_large, analyze_file and the file-upload ticket, reading the report line, relaying ⚠️ and ⛔️ badges to the user, handling free-tier quota exhaustion, and staying inside the 20 MB upload limit.
 ---
 
-# gemini-mcp: how to drive the gateway
+# gemini: how to drive the gateway
 
 This skill carries the *behavioural* policy. The mechanics of each call — parameters,
 response shape, error codes — ride in the tool descriptions and `--help`; nothing here
@@ -18,7 +18,7 @@ restates them.
   `file_upload_ticket` + `analyze_file`. Text documents are extracted server-side and
   run the same chunked pipeline, so nothing is lost and the bytes never enter your
   context.
-- CLI equivalent, one step: `gemini-mcp analyze --body-file <path>`, or the body on
+- CLI equivalent, one step: `gemini analyze --body-file <path>`, or the body on
   stdin.
 - Never pin `model` unless the user asked for one. The chain exists to keep working
   when a model's budget or availability changes, and pinned ids go stale.

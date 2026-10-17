@@ -1,10 +1,9 @@
 """Fakes & fixtures. No network, no real keys (b01)."""
-from __future__ import annotations
-
 import logging
 import re
 from types import SimpleNamespace
 
+import pytest
 from gemini_router import (
     Ledger,
     QuotaExhaustedError,
@@ -18,6 +17,22 @@ from gemini_router.config import Config as RouterConfig
 
 from gemini_mcp.config import AppCfg
 from gemini_mcp.tools import Deps
+
+
+@pytest.fixture(autouse=True)
+def _isolate_config_home(tmp_path, monkeypatch):
+    """Keep the suite off the real ~/.config and off the caller's cwd.
+
+    `_bootstrap_env` loads `<config_home>/.env` and then chdirs into config_home. On a
+    machine that has the tool installed for real, every test that touches the CLI would
+    otherwise pick up live keys and run in the user's config dir — and pass or fail
+    depending on the state of a directory no test owns.
+    """
+    monkeypatch.setenv("GEMINI_MCP_HOME", str(tmp_path / "gmcp-home"))
+    monkeypatch.delenv("GEMINI_MCP_ENV_FILE", raising=False)
+    monkeypatch.delenv("GEMINI_MCP_KEYS_FILE", raising=False)
+    monkeypatch.delenv("GEMINI_MCP_CONFIG", raising=False)
+    monkeypatch.chdir(tmp_path)
 
 
 class FakeRouter:

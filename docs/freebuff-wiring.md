@@ -1,4 +1,4 @@
-# Freebuff Desktop ↔ gemini-mcp wiring
+# Freebuff Desktop ↔ gemini wiring
 
 Two paths, both usable simultaneously (they share ONE ledger — quota spend is visible
 together). Edit **home-level** `~/.agents/mcp.json` (project-level configs are cached
@@ -11,7 +11,7 @@ unreliably — Freebuff bug #957); fully restart Freebuff after editing.
     "gemini": {
       "command": "ssh",
       "args": ["root@YOUR_VPS_HOST",
-               "~/.local/bin/gemini-mcp", "stdio"]
+               "~/.local/bin/gemini", "stdio"]
     } } }
 ```
 
@@ -77,7 +77,7 @@ prints once), then the pipe above + the python mcp.json rewrite. SSH hardening
    → single-shot path, watch progress messages (b03: record WHICH levels render —
    progress notifications / log lines / only the final `meta.progress_trace`).
 3. On the server: `bash scripts/run_remote.sh logs` → JSONL audit row with
-   `source=mcp`, and `journalctl -u gemini-mcp -n 20`.
+   `source=mcp`, and `journalctl -u gemini -n 20`.
 
 **Long calls are timeout-safe.** Clients cut MCP calls after ~30–60s
 (Freebuff did exactly that to a thinking-heavy `analyze_large`), so both compute tools
@@ -126,7 +126,7 @@ the uploaded file until it expires. Anything else (zip/gzip/unknown) fails fast 
 `binary_file_needs_conversion` and ZERO quota spent; a PDF over `pdf_max_mb`/`pdf_max_pages`
 is refused before any upload. Inbox retention: `keep_hours` (default 24) +
 `total_cap_mb` (default 500); pruned on each ticket issuance, at the start of every
-`analyze_file` and by `gemini-mcp prune`. An upload ticket is spent by its first PUT
+`analyze_file` and by `gemini prune`. An upload ticket is spent by its first PUT
 (the blob survives a replay, the spent marker is what refuses it), so a failed upload
 means a fresh ticket, never a retry of the old URL.
 

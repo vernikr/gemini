@@ -16,7 +16,10 @@ ROUTER_FLOOR = Version("0.1.15")
 
 
 def _router_requirement() -> str:
-    pyproject = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    # Repo root via __file__, never cwd: the suite runs with cwd pinned to a tmp dir
+    # so no test can pick up the checkout it happens to be invoked from.
+    root = Path(__file__).resolve().parent.parent
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
     reqs = pyproject["project"]["dependencies"]
     return next(r for r in reqs if r.startswith("gemini-router"))
 

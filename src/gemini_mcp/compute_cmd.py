@@ -1,4 +1,4 @@
-"""Compute subcommands: `gemini-mcp ask` and `gemini-mcp analyze`.
+"""Compute subcommands: `gemini ask` and `gemini analyze`.
 
 The agent-facing surface for environments with no MCP transport (OmniRush disables
 MCP outright). Parity rule: these call the SAME `*_tool()` functions the MCP server
@@ -124,7 +124,7 @@ def _from_tool_error(exc: Exception) -> tuple[dict, int]:
         payload = {}
     if not isinstance(payload, dict) or "error" not in payload:
         return (_error_payload("internal", redact(raw)[:500],
-                               fix="unexpected failure — run 'gemini-mcp doctor'"),
+                               fix="unexpected failure — run 'gemini doctor'"),
                 EXIT_UPSTREAM)
     code = str(payload["error"])
     # Everything the core put in the payload rides along — including its own `fix`,
@@ -162,7 +162,7 @@ def _read_text(path: str | None, *, what: str) -> tuple[str | None, dict | None]
         return None, _error_payload(
             "binary_file_needs_conversion",
             f"{what} is not UTF-8 text ({p.name}): {e.reason}",
-            fix="for PDF/DOCX/RTF use 'gemini-mcp analyze -f <path>' once the file "
+            fix="for PDF/DOCX/RTF use 'gemini analyze -f <path>' once the file "
                 "lane lands, or convert to plain text first")
 
 

@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 "use strict";
-/* @vernikr/gemini-mcp — thin bootstrap: runs the pinned Python core
-   (PyPI dist: gemini-mcp-gateway) through uv. No core logic lives here.
+/* @vernikr/gemini — thin bootstrap: runs the pinned Python core
+   (PyPI dist: vernikr-gemini) through uv. No core logic lives here.
    Version lockstep: this package's version == the PyPI pin. */
 const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
-const CORE = "gemini-mcp-gateway";
+const CORE = "vernikr-gemini";
 const VER = require("../package.json").version;
 const win = process.platform === "win32";
 const HINT = "hint: install uv once: " + (win
@@ -33,7 +33,7 @@ let uvx = findUvx();
 if (!uvx) {
   // uv is NOT distributed via npm — bootstrap with the official standalone
   // installer (one time), without touching shell rc files.
-  console.error("gemini-mcp: uv not found — running the official astral.sh installer (one time)…");
+  console.error("gemini: uv not found — running the official astral.sh installer (one time)…");
   const r = win
     ? spawnSync("powershell", ["-ExecutionPolicy", "ByPass", "-c",
         "irm https://astral.sh/uv/install.ps1 | iex"], { stdio: "inherit" })
@@ -43,14 +43,14 @@ if (!uvx) {
   uvx = (r.status === 0 && findUvx()) || null;
 }
 if (!uvx) {
-  console.error(`gemini-mcp: bootstrap failed: uv unavailable\n${HINT}`);
+  console.error(`gemini: bootstrap failed: uv unavailable\n${HINT}`);
   process.exit(1);
 }
 // bin name != dist name: uvx needs --from (verified against PyPI 0.7.1)
-const res = spawnSync(uvx, ["--from", `${CORE}==${VER}`, "gemini-mcp",
+const res = spawnSync(uvx, ["--from", `${CORE}==${VER}`, "gemini",
   ...process.argv.slice(2)], { stdio: "inherit" });
 if (res.error) {
-  console.error(`gemini-mcp: bootstrap failed: ${res.error.message}\n${HINT}`);
+  console.error(`gemini: bootstrap failed: ${res.error.message}\n${HINT}`);
   process.exit(1);
 }
 process.exit(res.status == null ? 1 : res.status);

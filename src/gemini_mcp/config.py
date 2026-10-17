@@ -117,10 +117,14 @@ def parse_keys(text: str) -> list[str]:
 
 
 def config_home() -> Path:
-    """Wizard-managed config dir: $GEMINI_MCP_HOME or ~/.config/gemini-mcp (XDG-ish,
+    """Wizard-managed config dir: $GEMINI_MCP_HOME or ~/.config/gemini (XDG-ish,
     same on macOS/Linux). setup writes config.yaml + .env (0600) here."""
-    return Path(os.environ.get("GEMINI_MCP_HOME")
-                or Path.home() / ".config" / "gemini-mcp")
+    if env := os.environ.get("GEMINI_MCP_HOME"):
+        return Path(env)
+    new, legacy = Path.home() / ".config" / "gemini", Path.home() / ".config" / "gemini-mcp"
+    # Pre-rename installs keep their keys and ledger: prefer the old dir until it is
+    # moved, so upgrading never reads as "no keys configured".
+    return legacy if legacy.is_dir() and not new.is_dir() else new
 
 
 def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConfig]:

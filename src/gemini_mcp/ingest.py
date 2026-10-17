@@ -138,7 +138,7 @@ def _evict(inbox: Path, name: str) -> None:
 def prune(inbox: Path, keep_hours: float, total_cap_mb: float) -> int:
     """Drop blobs older than keep_hours; then oldest-first until the total fits the
     cap. Returns count removed. Triggers: ticket issuance, a completed analyze_file
-    and `gemini-mcp prune` — an inbox nobody asks tickets from still ages out."""
+    and `gemini prune` — an inbox nobody asks tickets from still ages out."""
     if not inbox.exists():
         return 0
     now = time.time()

@@ -22,12 +22,12 @@ def home_targets(tmp_path, monkeypatch):
 def test_install_writes_both_scopes_and_a_manifest(home_targets, capsys):
     assert skill_cmd.install() == 0
     for dir_ in home_targets:
-        text = (dir_ / "gemini-mcp" / "SKILL.md").read_text("utf-8")
+        text = (dir_ / "gemini" / "SKILL.md").read_text("utf-8")
         assert BREVITY_RULE in text, "the installed skill must carry the canonical rule"
         assert "{brevity_rule}" not in text, "the placeholder must not ship"
         # the manifest is what makes uninstall safe: without it we could not tell our own
         # skill from somebody else's
-        assert (dir_ / skill_cmd.MANIFEST).read_text("utf-8").strip() == "gemini-mcp"
+        assert (dir_ / skill_cmd.MANIFEST).read_text("utf-8").strip() == "gemini"
     assert "installed" in capsys.readouterr().out
 
 
@@ -43,7 +43,7 @@ def test_status_reports_a_stale_copy_rather_than_passing(home_targets, capsys):
     because a stale skill quietly keeps teaching last month's policy."""
     skill_cmd.install()
     capsys.readouterr()
-    victim = home_targets[0] / "gemini-mcp" / "SKILL.md"
+    victim = home_targets[0] / "gemini" / "SKILL.md"
     victim.write_text("an older skill\n", encoding="utf-8")
 
     assert skill_cmd.status() == 0
@@ -61,7 +61,7 @@ def test_uninstall_removes_only_what_it_installed(home_targets, capsys):
     capsys.readouterr()
 
     assert skill_cmd.uninstall() == 0
-    assert not (home_targets[0] / "gemini-mcp").exists()
+    assert not (home_targets[0] / "gemini").exists()
     assert other.is_dir(), "uninstall must never touch a skill it did not install"
     assert not (home_targets[0] / skill_cmd.MANIFEST).exists()
     assert "nothing installed by this command" in capsys.readouterr().out or True
@@ -88,3 +88,40 @@ def test_the_skill_stays_inside_the_discovery_budget():
     assert len(desc) <= 1024, "the spec caps description at 1024 chars"
     assert len(desc) / 3.9 < 150, "description must cost ~100-120 tokens, not more"
     assert len(text) / 3.9 < 5000, "the body is loaded on activation; keep it under budget"
+
+
+def test_install_retires_the_pre_rename_skill(home_targets, capsys):
+    """The command was renamed, so an upgrade lands beside the old skill instead of over
+    it. Left alone, the loader picks up both and the stale copy keeps teaching last
+    release's policy — silently, with every other test still green."""
+    for dir_ in home_targets:
+        dir_.mkdir(parents=True)
+        (dir_ / "gemini-mcp").mkdir()
+        (dir_ / "gemini-mcp" / "SKILL.md").write_text("old policy", "utf-8")
+        (dir_ / skill_cmd.MANIFEST).write_text("gemini-mcp\n", "utf-8")
+    capsys.readouterr()
+
+    assert skill_cmd.install() == 0
+
+    for dir_ in home_targets:
+        assert not (dir_ / "gemini-mcp").exists(), "the superseded skill must be gone"
+        assert (dir_ / "gemini" / "SKILL.md").is_file()
+        assert (dir_ / skill_cmd.MANIFEST).read_text("utf-8").strip() == "gemini"
+    assert "removed superseded" in capsys.readouterr().out
+
+
+def test_uninstall_removes_a_pre_rename_install(home_targets, capsys):
+    """Uninstall has to honour what the manifest recorded, not today's SKILL_NAME —
+    otherwise renaming strands the old directory forever."""
+    for dir_ in home_targets:
+        dir_.mkdir(parents=True)
+        (dir_ / "gemini-mcp").mkdir()
+        (dir_ / "gemini-mcp" / "SKILL.md").write_text("old policy", "utf-8")
+        (dir_ / skill_cmd.MANIFEST).write_text("gemini-mcp\n", "utf-8")
+    capsys.readouterr()
+
+    assert skill_cmd.uninstall() == 0
+
+    for dir_ in home_targets:
+        assert not (dir_ / "gemini-mcp").exists()
+        assert not (dir_ / skill_cmd.MANIFEST).exists()

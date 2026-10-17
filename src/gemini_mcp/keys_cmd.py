@@ -1,9 +1,9 @@
-"""`gemini-mcp keys` — one command to manage the API-key pool on whatever host runs
+"""`gemini keys` — one command to manage the API-key pool on whatever host runs
 the gateway.
 
-    gemini-mcp keys                 # list: fingerprints, masks, where the pool lives
-    gemini-mcp keys add <key>…      # validate → probe (free) → write 0600 → restart
-    gemini-mcp keys remove <ref>…   # by index, fingerprint prefix or the key itself
+    gemini keys                 # list: fingerprints, masks, where the pool lives
+    gemini keys add <key>…      # validate → probe (free) → write 0600 → restart
+    gemini keys remove <ref>…   # by index, fingerprint prefix or the key itself
 
 Why a command and not a doc: "edit the unit's EnvironmentFile and restart" is the kind of
 procedure that is remembered until it is needed. The command detects the file itself (the
@@ -215,24 +215,24 @@ def run(args) -> int:
                 print(json.dumps(report, indent=1))
             else:
                 print(f"key pool: {path}  ({source})")
-                _print_rows(rows) if rows else print("  (empty — add one: gemini-mcp "
+                _print_rows(rows) if rows else print("  (empty — add one: gemini "
                                                      "keys add <key>)")
                 if rejected:
                     # The command to drop them exists; a pool that lists the dead next to
                     # the living should say so, or the operator goes looking for one
                     # (owner, 2026-10-11 — added the key, asked where removal was).
-                    print(f"  {len(rejected)} rejected — remove: gemini-mcp keys remove "
+                    print(f"  {len(rejected)} rejected — remove: gemini keys remove "
                           + " ".join(r["fingerprint"] for r in rejected))
                 elif rows and "probe" not in rows[0]:
-                    print("  next: gemini-mcp keys list --check probes each key (free)"
-                          " · gemini-mcp keys remove <n|fp> drops one")
+                    print("  next: gemini keys list --check probes each key (free)"
+                          " · gemini keys remove <n|fp> drops one")
             if rejected:
                 return 1
             return 0
 
         if action == "add":
             if not items:
-                raise KeysError("nothing to add; usage: gemini-mcp keys add <key>…")
+                raise KeysError("nothing to add; usage: gemini keys add <key>…")
             have = {fingerprint(k) for k in keys}
             added = 0
             for k in items:
@@ -254,7 +254,7 @@ def run(args) -> int:
 
         elif action == "remove":
             if not items:
-                raise KeysError("nothing to remove; usage: gemini-mcp keys remove <n|fp|key>…")
+                raise KeysError("nothing to remove; usage: gemini keys remove <n|fp|key>…")
             for ref in items:
                 idx = None
                 if ref.isdigit() and 1 <= int(ref) <= len(keys):
@@ -264,7 +264,7 @@ def run(args) -> int:
                                 if k == ref or fingerprint(k).startswith(ref)
                                 or fingerprint(ref) == fingerprint(k)), None)
                 if idx is None:
-                    raise KeysError(f"no key matches {ref!r} (use `gemini-mcp keys` "
+                    raise KeysError(f"no key matches {ref!r} (use `gemini keys` "
                                     "to list the pool)")
                 if len(keys) == 1 and not force:
                     raise KeysError("that is the only key; removing it empties the pool "
@@ -302,6 +302,6 @@ def run(args) -> int:
             if "restart" in report:
                 print(f"service: {report['restart']}"
                       + (f" · healthz: {report['healthz']}" if "healthz" in report else ""))
-            print("next: `gemini-mcp keys` lists the pool · `gemini-mcp keys remove "
-                  "<n|fp>` drops a dead one · `gemini-mcp doctor` checks keys")
+            print("next: `gemini keys` lists the pool · `gemini keys remove "
+                  "<n|fp>` drops a dead one · `gemini doctor` checks keys")
     return 0

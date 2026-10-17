@@ -1,6 +1,6 @@
-"""`gemini-mcp setup` — idempotent consumer onboarding.
+"""`gemini setup` — idempotent consumer onboarding.
 
-Writes $GEMINI_MCP_HOME (~/.config/gemini-mcp)/{config.yaml,.env 0600}, optionally
+Writes $GEMINI_MCP_HOME (~/.config/gemini)/{config.yaml,.env 0600}, optionally
 probes keys live (listModels on an in-memory ledger — zero disk state, zero RPD spend),
 prints ready-to-paste client snippets. Non-interactive with --json/--keys/--backend;
 interactive otherwise (one fleet-vs-simple question, masked key paste). Re-run = no-op
@@ -26,7 +26,7 @@ from gemini_router.config import key_id
 from . import __version__
 from .config import config_home
 
-FLEET_REPOS = ("gemini-mcp", "gemini-router")     # github.com/vernikr/<name>, private
+FLEET_REPOS = ("gemini", "gemini-router")     # github.com/vernikr/<name>, private
 FLEET_HEALTHZ = "curl -fsS --max-time 3 http://127.0.0.1:8790/healthz"
 
 # Same JSON shape everywhere: {"mcpServers": {"gemini": {…}}} — safe to merge.
@@ -100,14 +100,14 @@ def _write_client_configs(names: list[str], entry: dict, deployed_fleet: bool,
             {"client": name, "path": str(path),
              "backup": str(backup) if backup else None})
 
-ENV_HEADER = ("# gemini-mcp credentials — written by `gemini-mcp setup` (mode 0600).\n"
+ENV_HEADER = ("# gemini credentials — written by `gemini setup` (mode 0600).\n"
               "# Keys: https://aistudio.google.com/app/apikey (free tier).\n")
-CFG_HEADER = "# gemini-mcp app config — written by `gemini-mcp setup`.\n"
+CFG_HEADER = "# gemini app config — written by `gemini setup`.\n"
 
 
 def _tool_bin(user: str) -> str:
     home = "/root" if user == "root" else f"/home/{user}"
-    return f"{home}/.local/bin/gemini-mcp"      # uv-tool binary — the CD-managed one
+    return f"{home}/.local/bin/gemini"      # uv-tool binary — the CD-managed one
 
 
 def _client_snippets(backend: str, fleet: dict | None = None,
@@ -120,10 +120,10 @@ def _client_snippets(backend: str, fleet: dict | None = None,
     if backend == "direct":
         return {"paste_now": True,
                 "pnpm_npx": {"command": "npx",
-                             "args": ["-y", "@vernikr/gemini-mcp", "stdio"]},
+                             "args": ["-y", "@vernikr/gemini", "stdio"]},
                 "uvx_pinned": {"command": "uvx",
-                               "args": ["--from", f"gemini-mcp-gateway=={__version__}",
-                                        "gemini-mcp", "stdio"]},
+                               "args": ["--from", f"vernikr-gemini=={__version__}",
+                                        "gemini", "stdio"]},
                 "paste_where": paste_where}
     host = (fleet or {}).get("host") or "<YOUR_VPS>"
     user = (fleet or {}).get("user") or "root"
@@ -133,18 +133,18 @@ def _client_snippets(backend: str, fleet: dict | None = None,
         return {"paste_now": True, "ssh": ssh_entry, "paste_where": paste_where}
     return {"paste_now": False, "ssh": ssh_entry,
             "deploy_steps": [
-                f"re-run with the wizard doing the work: gemini-mcp setup --backend "
+                f"re-run with the wizard doing the work: gemini setup --backend "
                 f"router --vps-host {host}   (clones/updates the repos, provisions "
                 f"the server, pushes keys — needs git+ssh auth from this machine, "
                 f"macOS/Linux)",
-                "or fully manual: git clone https://github.com/vernikr/gemini-mcp and "
+                "or fully manual: git clone https://github.com/vernikr/gemini and "
                 "…/gemini-router side by side (folder already exists? "
                 "git -C <dir> pull --ff-only instead of cloning)",
-                f"from inside the gemini-mcp clone: VPS_HOST={host} VPS_USER={user} "
+                f"from inside the gemini clone: VPS_HOST={host} VPS_USER={user} "
                 "bash scripts/run_remote.sh setup   (streams its own progress)",
                 f"keys: ssh {user}@{host} and set GEMINI_API_KEYS=<key>,<key> in "
                 "/opt/apps/gemini-mcp/.env (chmod 600), then "
-                "systemctl restart gemini-mcp",
+                "systemctl restart gemini",
                 "THEN paste the ssh snippet below into your client config and "
                 "restart the client"]}
 
@@ -233,7 +233,7 @@ def _sync_repos(projects_dir: Path, log: list[str]) -> Path:
                                  "are private; your git must authenticate to GitHub "
                                  "(gh auth login or a credential helper)")
             log.append(f"cloned {d}")
-    return projects_dir / "gemini-mcp"
+    return projects_dir / "gemini"
 
 
 def _ssh(host: str, user: str, remote: str, *, input: str | None = None,
@@ -290,7 +290,7 @@ def deploy_fleet(*, host: str, user: str, projects_dir: Path,
     repo = _sync_repos(projects_dir, log)
     pre = _server_health(host, user)
     if pre and pre.get("ok") and _ver_tuple(pre.get("version", "")) >= _ver_tuple(__version__):
-        log.append(f"server already runs gemini-mcp {pre.get('version')} "
+        log.append(f"server already runs gemini {pre.get('version')} "
                    f"(>= {__version__}) — provisioning skipped")
     else:
         log.append(f"provisioning {user}@{host} via scripts/run_remote.sh setup "
@@ -308,7 +308,7 @@ def deploy_fleet(*, host: str, user: str, projects_dir: Path,
         time.sleep(1.5)
     if not health or not health.get("ok"):
         raise SetupError(f"server not healthy after deploy — check: ssh {user}@{host} "
-                         "systemctl status gemini-mcp")
+                         "systemctl status gemini")
     log.append(f"healthz ok: version={health.get('version')} "
                f"backend={health.get('backend')}")
     return {"log": log, "healthz": health}
@@ -347,12 +347,12 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
     if interactive:
         from rich.prompt import Prompt
         if console:
-            console.print("[bold]gemini-mcp setup[/bold]")
+            console.print("[bold]gemini setup[/bold]")
             console.print("  1) [bold]Simple[/bold] — direct to Google AI Studio from "
                           "this machine (no server; default)")
             console.print("  2) [bold]Fleet[/bold] — gateway on my VPS/router "
                           "(shared quota ledger; the wizard deploys it for you)")
-        choice = Prompt.ask("How will you run gemini-mcp?", choices=["1", "2"],
+        choice = Prompt.ask("How will you run gemini?", choices=["1", "2"],
                             default="1", console=console)
         backend = "direct" if choice == "1" else "router"
     backend = backend or "direct"
@@ -430,7 +430,7 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
             report["probe"] = asyncio.run(_probe_keys(key_list))
         except Exception as e:  # noqa: BLE001 — offline must not fail the setup
             report["probe"] = {"error": str(e)[:200],
-                               "hint": "keys are saved; re-check with `gemini-mcp doctor`"}
+                               "hint": "keys are saved; re-check with `gemini doctor`"}
     deployed = False
     if backend == "router":
         keys_csv = ",".join(k.strip() for k in (keys or "").split(",")
