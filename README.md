@@ -20,6 +20,22 @@ a compact consolidated result — the agent's own context stays clean.
   `backend: auto` picks router only when persistent state exists; env
   `GEMINI_MCP_BACKEND` overrides. See [`docs/08-dual-mode.md`](docs/08-dual-mode.md).
 
+## Install the agent skill
+
+```bash
+gemini-mcp skill install        # or: npx -y @vernikr/gemini-mcp skill install
+```
+
+Copies the bundled skill into `~/.agents/skills/gemini-mcp` (Codex, Cursor, Copilot,
+Gemini CLI, OpenCode, Freebuff) and `~/.claude/skills/gemini-mcp` (Claude Code). Restart
+the agent and open a new thread — skills are read when a session starts.
+
+The skill carries the behavioural policy that does not fit in a tool description: which
+tool to use for a given body, routing profiles, the ⚠️/⛔️ badges owed to the user, quota
+handling, and what to do about an oversized upload. `gemini-mcp skill status` reports
+what is installed where and flags a copy that has drifted from the packaged one;
+`gemini-mcp skill uninstall` removes only what `install` wrote.
+
 ## Quick start
 
 ### If you're human
