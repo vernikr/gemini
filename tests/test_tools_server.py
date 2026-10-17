@@ -352,3 +352,59 @@ async def test_how_a_request_ran_is_persisted_not_just_returned():
     assert row["rough_edges"] == 0                 # a clean run says so, numerically
     assert [e["stage"] for e in row["trace"]] == [
         "received", "router:dispatch", "router:ok", "done"]   # the whole run, in order
+
+
+# ------------------------------------------------------- the join key between two logs
+async def test_a_call_with_no_request_id_still_gets_one():
+    """The owner's layering rule joins a consumer's thin boundary record to this
+    service's log by request_id. Measured live on 2026-10-17, a call that supplied no id
+    left BOTH sides with request_id = None, so the two logs could not be joined at all.
+    The id is therefore generated here rather than left to the caller's diligence.
+    """
+    router = FakeRouter()
+    deps = make_deps(router=router)
+
+    out = await gemini_generate_tool(deps, ProgressEmitter(FakeCtx()),
+                                     {"prompt": "hello"})
+
+    rid = out["meta"]["request_id"]
+    assert rid and rid.startswith("gemini_generate-"), rid
+    assert router.calls[0].request_id == rid, "the ledger row must carry the same id"
+    assert deps.audit.entries[-1]["request_id"] == rid
+
+
+async def test_the_chunks_of_one_job_share_its_request_id():
+    """Without a parent id, Pipeline._rid returned None for every chunk and consolidation
+    sub-request, so one analyze job landed in the ledger as unrelated rows."""
+    router = FakeRouter()
+    deps = make_deps(router=router, app_cfg=make_app_cfg(chunk_threshold_tokens=1))
+
+    out = await analyze_large_tool(deps, ProgressEmitter(FakeCtx()),
+                                   {"task": "t", "body": "a" * 400})
+
+    rid = out["meta"]["request_id"]
+    assert rid and rid.startswith("analyze_large-")
+    assert len(router.calls) > 1, "the fixture must really exercise the chunked path"
+    assert all(c.request_id and c.request_id.startswith(rid) for c in router.calls), \
+        [c.request_id for c in router.calls]
+
+
+async def test_the_caller_decides_which_surface_it_is():
+    """The CLI passes source="cli"; the tools used to overwrite it with a hardcoded
+    "mcp", so the executor's log could not tell the two surfaces apart. Confirmed live:
+    a CLI call landed in the ledger as source='mcp'."""
+    for tool, params in (
+        (gemini_generate_tool, {"prompt": "hello", "source": "cli"}),
+        (analyze_large_tool, {"task": "t", "body": "small body", "source": "cli"}),
+    ):
+        router = FakeRouter()
+        await tool(make_deps(router=router), ProgressEmitter(FakeCtx()), params)
+        assert all(c.source == "cli" for c in router.calls), \
+            [c.source for c in router.calls]
+
+
+async def test_source_defaults_to_mcp_when_nobody_says():
+    router = FakeRouter()
+    await gemini_generate_tool(make_deps(router=router), ProgressEmitter(FakeCtx()),
+                               {"prompt": "hello"})
+    assert router.calls[0].source == "mcp"
