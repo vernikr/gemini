@@ -199,6 +199,45 @@ def _run_doctor(app_cfg: AppCfg, router_cfg, args) -> int:
     return rc
 
 
+def _add_compute_flags(p) -> None:
+    """One vocabulary for every compute subcommand — not a dialect per command."""
+    p.add_argument("--task", help="what to do with the body (required for analyze)")
+    p.add_argument("--prompt", help="the prompt (ask). Prefer --prompt-file or stdin: "
+                                    "argv is visible in ps/history and length-limited")
+    p.add_argument("--prompt-file", help="read the prompt from this file")
+    p.add_argument("--body-file", help="read the body from this file (analyze). The "
+                                       "body is never taken from argv")
+    p.add_argument("--system", help="system instruction (ask only)")
+    p.add_argument("--upload-id", help="analyze an already-uploaded file by its id")
+    p.add_argument("-f", "--file", action="append", dest="file",
+                   help="file to analyze (reserved: the CLI file lane is not wired yet)")
+    p.add_argument("--thinking", choices=["low", "medium", "high"],
+                   help="thinking level (default: the config default)")
+    p.add_argument("--format", choices=["text", "json"], default="text",
+                   help="answer format requested from the model")
+    p.add_argument("--max-output-tokens", type=int,
+                   help="cap per model call. Small values starve the visible answer: "
+                        "on thinking models the cap covers thought tokens too")
+    p.add_argument("--model", help="pin one model (skips the fallback chain)")
+    p.add_argument("--overflow", choices=["off", "lite", "lite+gemma"], default="off",
+                   help="weaker tiers when Flash quotas run out (route 'optimal' "
+                        "upgrades this to lite+gemma on its own)")
+    p.add_argument("--route", choices=["optimal", "best_available"],
+                   help="routing profile (default: the config default)")
+    p.add_argument("--wait-for-minute-limits", dest="wait_for_minute_limits",
+                   action="store_true", default=None,
+                   help="wait out RPM/TPM windows (default: wait)")
+    p.add_argument("--no-wait", dest="wait_for_minute_limits", action="store_false",
+                   help="do not wait out minute windows; route on or fail fast")
+    p.add_argument("--request-id", help="idempotency key; repeating it replays the "
+                                        "cached result")
+    p.add_argument("--fields", help="comma-separated meta fields to return "
+                                    "(default: a short set; 'all' for everything)")
+    p.add_argument("--json", action="store_true",
+                   help="force JSON on stdout (already the default when stdout is "
+                        "not a terminal)")
+
+
 def _project_root() -> Path | None:
     """Project root when running from an installed-layout venv: <root>/.venv/bin/exe."""
     exe = Path(sys.executable or "")
@@ -410,6 +449,13 @@ def main(argv: list[str] | None = None) -> int:
                    help="keep a key that failed the probe / remove the last key")
     p.add_argument("--json", action="store_true")
 
+    p = sub.add_parser("ask", help="single-shot completion (MCP gemini_generate). "
+                                   "Prompt from --prompt, --prompt-file or stdin")
+    _add_compute_flags(p)
+    p = sub.add_parser("analyze", help="chunked analysis of a massive text body "
+                                       "(MCP analyze_large). Body from --body-file or stdin")
+    _add_compute_flags(p)
+
     args = ap.parse_args(argv)
     if not args.cmd:                              # bare invocation: show the way in
         ap.print_help()
@@ -456,6 +502,15 @@ def main(argv: list[str] | None = None) -> int:
             return _run_doctor(app_cfg, router_cfg, args)
         if args.cmd == "smoke":
             return _run_smoke(app_cfg, router_cfg, args)
+        if args.cmd in ("ask", "analyze"):
+            from .compute_cmd import run_analyze, run_analyze_file, run_ask
+
+            deps = _deps(app_cfg, router_cfg)
+            if args.cmd == "ask":
+                return run_ask(deps, app_cfg, args)
+            if args.upload_id:      # the file lane's server-side half: already uploaded
+                return run_analyze_file(deps, app_cfg, args)
+            return run_analyze(deps, app_cfg, args)
     except Exception as e:  # noqa: BLE001 — CLI must never traceback at the user
         console.print(f"[red]error:[/red] {redact(str(e))}")
         if "no API keys" in str(e):
