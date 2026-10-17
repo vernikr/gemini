@@ -303,6 +303,17 @@ npx -y @vernikr/gemini-mcp calls -n 20   # local audit tail
   walks models automatically, `quota_exhausted` errors carry the reset ETA + overflow hint.
 - Direct-mode counters are per-machine (local `state.db`): accurate across restarts and
   concurrent local clients, NOT shared with other machines — that's fleet mode's job.
+- Output length, measured against the live free tier rather than taken from the docs:
+  the provider declares 65,536 output tokens and honours `maxOutputTokens` exactly —
+  and `thinkingConfig` tokens are billed against the same budget, so a thinking model's
+  *visible* answer is the cap minus its thoughts. In practice the binding limit is the
+  model's willingness, not the tier: a single call was observed delivering ~11,300
+  candidate tokens (~43 KB of prose), and every attempt to go further ended in the model
+  stopping on its own (`finishReason: STOP`) rather than in a provider refusal — the same
+  prompt and cap gave `MAX_TOKENS` in one run and `STOP` in the next. Near-ceiling output
+  is also slow (~180 tok/s), so it never fits the inline window and always becomes a
+  ticket job. This is why there is no length cap: the removed one sat far below what a
+  call actually returns.
 - `ETARGET`/404 right after a release: npm registry propagation takes ~2–4 min — retry.
 - Empty `healthz` through a tunnel (fleet): the tunnel isn't loaded —
   `launchctl load ~/Library/LaunchAgents/com.vernikr.gemini-tunnel.plist`
