@@ -18,7 +18,10 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 ## B. MCP interface (tools)
 
 - **FR-B1** MUST expose `analyze_large`: quota-aware analysis of a massive text body with
-  automatic chunking + consolidation.
+  automatic chunking + consolidation. `body` is an argument, so it traverses the caller's
+  context; when the body is NOT already there, callers MUST use the file lane
+  (FR-E9 + FR-B10) so that it never does. Documented in the tool instructions and
+  `docs/06-consumer.md`.
 - **FR-B2** MUST expose `gemini_generate`: single-shot quota-aware completion (body fits
   limits; no chunking). Same routing/thinking/overflow semantics.
 - **FR-B3** MUST expose `quota_status`: live budget table + recommendation for the next

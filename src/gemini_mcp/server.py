@@ -73,6 +73,15 @@ model fallbacks, minute-limit waits with seconds, failed chunks — details are 
 meta.progress_trace). If the call errored, say so
 plainly with the reset ETA. Never silently swallow retries, waits or fallbacks.
 
+LARGE BODIES — which tool: `analyze_large` takes `body` as an argument, so whatever
+you pass it passes through YOUR context on the way. Use it when the text is already
+in your context anyway. When it is not — it sits in a file, or it is long enough that
+inlining it would cost you the window — do NOT paste it: write it to a file and go
+through file_upload_ticket + analyze_file. Text documents are extracted server-side
+and run the same chunked pipeline, so nothing is lost by taking that route, and the
+bytes never enter your context. The CLI does this in one step
+(`analyze --body-file <path>`, or the body on stdin).
+
 LENGTH (required): ask Gemini for a SHORT answer by default — say so in words inside
 'task' ("answer in 3-5 sentences", "conclusions only"). Ask for the full treatment
 only when the task actually calls for it. Nothing on the server shortens an answer

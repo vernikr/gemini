@@ -226,6 +226,14 @@ Pasting raw file contents into
 `gemini_generate`/`analyze_large` is rejected (`raw_document_inlined`): markup like RTF
 is unreadable for the model (non-ASCII text survives as hex escapes).
 
+A large body that is NOT already in the agent's context — it sits in a file, or it is
+long enough that inlining it would cost the window — must not be pasted into
+`analyze_large`: `body` is an argument, so it passes through the agent's context on
+the way. Write it to a file and use `file_upload_ticket` + `analyze_file`; text
+documents are extracted server-side and run the same chunked pipeline, so nothing is
+lost and the bytes never enter the context. The CLI takes the same route in one step
+(`gemini-mcp analyze --body-file <path>`, or the body on stdin).
+
 Several files, one answer: repeat ticket + upload for each file, then call
 `analyze_files(task, upload_ids=[…])`. Text documents keep the chunked pipeline each;
 PDFs/images/audio are measured for free and packed by measured tokens into as few group
