@@ -332,3 +332,23 @@ async def test_the_file_flow_is_stated_once(tmp_path):
                                    {"prompt": "{\\rtf1\\ansi inlined"})
     fix = json.loads(str(ei.value))["fix"]
     assert FILE_FLOW in fix                     # the same sentence, not a paraphrase
+
+
+async def test_how_a_request_ran_is_persisted_not_just_returned():
+    """The owner's layering rule: a consumer logs a thin "I asked / I got" and the
+    internals live here. That only holds if the internals outlive the response —
+    the fallbacks, waits and model switches must be answerable from the log alone.
+    """
+    router = FakeRouter()
+    deps = make_deps(router=router)
+
+    await gemini_generate_tool(deps, ProgressEmitter(None, deps.logger),
+                               {"prompt": "hello", "source": "test"})
+
+    rows = [e for e in deps.audit.entries if e.get("tool") == "gemini_generate"]
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["trace"], "the stage-by-stage history is written, not dropped"
+    assert row["rough_edges"] == 0                 # a clean run says so, numerically
+    assert [e["stage"] for e in row["trace"]] == [
+        "received", "router:dispatch", "router:ok", "done"]   # the whole run, in order

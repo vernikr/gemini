@@ -264,6 +264,22 @@ def _inline_doc_guard(text: str | None, field: str) -> None:
             }, ensure_ascii=False))
 
 
+def _record(deps: Deps, tool: str, meta: dict, **extra) -> None:
+    """One audit row per operation, with HOW it went persisted — not only in the reply.
+
+    The owner's layering rule: a consumer logs its own thin "I asked / I got" and
+    nothing else; everything about how the request actually ran belongs here. That
+    only holds if the internals survive the response. Until now they did not:
+    `progress_trace` was computed, used to build the report line, returned once, and
+    dropped — so the fallbacks, waits and model switches were unanswerable afterwards
+    from any log. Retention is the existing one (audit_keep_days / audit_max_mb).
+    """
+    trace = meta.get("progress_trace") or []
+    deps.audit.record({"ts": time.time(), "tool": tool, "request_id": meta.get("request_id"),
+                       "rough_edges": len(_rough_episodes(trace)), "trace": trace,
+                       **extra})
+
+
 async def analyze_large_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
     p = AnalyzeParams(**params)
     _inline_doc_guard(p.body, "body")
@@ -276,17 +292,16 @@ async def analyze_large_tool(deps: Deps, emitter: ProgressEmitter, params: dict)
     meta = {**meta, "route": p.route, "overflow": p.overflow, "backend": deps.backend,
             "model_final": (meta.get("models_used") or [None])[-1],
             "requested_model": p.model}
-    deps.audit.record({
-        "ts": time.time(), "tool": "analyze_large", "request_id": p.request_id,
-        "route": p.route, "overflow": p.overflow,
-        "task_chars": len(p.task), "body_chars": len(p.body or ""),
-        "thinking_level": meta["thinking_level"], "models_used": meta["models_used"],
-        "chunks": meta["chunks"].get("count", 0), "failed_chunks": meta["chunks"].get("failed", []),
-        "requests_spent": meta["requests_spent"], "cache_hits": meta["cache_hits"],
-        "elapsed_s": meta["elapsed_s"], "result_chars": len(text),
-        "body": (p.body or "") if deps.app_cfg.logging.dump_bodies else None,
-        "result": text if deps.app_cfg.logging.dump_bodies else None,
-    })
+    _record(deps, "analyze_large", meta,
+            route=p.route, overflow=p.overflow,
+            task_chars=len(p.task), body_chars=len(p.body or ""),
+            thinking_level=meta["thinking_level"], models_used=meta["models_used"],
+            chunks=meta["chunks"].get("count", 0),
+            failed_chunks=meta["chunks"].get("failed", []),
+            requests_spent=meta["requests_spent"], cache_hits=meta["cache_hits"],
+            elapsed_s=meta["elapsed_s"], result_chars=len(text),
+            body=(p.body or "") if deps.app_cfg.logging.dump_bodies else None,
+            result=text if deps.app_cfg.logging.dump_bodies else None)
     return {"report": _report(meta), "result": text, "meta": meta}
 
 
@@ -315,12 +330,11 @@ async def gemini_generate_tool(deps: Deps, emitter: ProgressEmitter, params: dic
             "route": route, "overflow": ovf, "backend": deps.backend,
             "thinking_level": req.thinking_level, "progress_trace": emitter.trace,
             "requested_model": req.model}
-    deps.audit.record({"ts": time.time(), "tool": "gemini_generate",
-                       "request_id": res.request_id, "model": res.model,
-                       "route": route, "overflow": ovf,
-                       "prompt_chars": len(req.prompt), "cached": res.cached,
-                       "tokens_in": res.tokens_in, "tokens_out": res.tokens_out,
-                       "elapsed_s": res.latency_s})
+    _record(deps, "gemini_generate", meta,
+            model=res.model, route=route, overflow=ovf,
+            prompt_chars=len(req.prompt), cached=res.cached,
+            tokens_in=res.tokens_in, tokens_out=res.tokens_out,
+            elapsed_s=res.latency_s)
     return {"report": _report(meta), "result": res.text, "meta": meta}
 
 
@@ -634,11 +648,10 @@ async def _provider_file_analysis(deps: Deps, emitter: ProgressEmitter, params: 
     if drift:
         meta["cost"] = {"drift": drift}
         _record_drift(deps, router, up.key_id, res.model, cls, up.media_resolution, drift)
-    deps.audit.record({"ts": time.time(), "tool": "analyze_file", "upload_id": upload_id,
-                       "filename": filename, "bytes": loaded.nbytes, "mime": up.mime,
-                       "file_tokens": file_tokens, "via": "files_api",
-                       "provider_file": served.name, "request_id": res.request_id,
-                       "model": res.model, "cached": res.cached})
+    _record(deps, "analyze_file", meta, upload_id=upload_id,
+            filename=filename, bytes=loaded.nbytes, mime=up.mime,
+            file_tokens=file_tokens, via="files_api",
+            provider_file=served.name, model=res.model, cached=res.cached)
     report = (f"file={filename} ({loaded.nbytes} bytes"
               + (f", {file_tokens} tokens" if file_tokens else "")
               + (f", {up.media_resolution}" if up.media_resolution else "")
