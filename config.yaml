@@ -28,7 +28,6 @@ pipeline:
   merge_tail_ratio: 0.05
   consolidation_fanin: 6
   fail_on_chunk_error: true
-  max_result_chars: 12000
 
 thinking:
   default: medium          # per-request override always wins

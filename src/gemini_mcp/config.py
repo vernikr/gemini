@@ -17,7 +17,6 @@ class PipelineCfg(BaseModel):
     merge_tail_ratio: float = 0.05          # merge last chunk if < 5% of budget
     consolidation_fanin: int = 6            # recursive tree-reduce group size
     fail_on_chunk_error: bool = True        # false → continue with marked gaps (FR-D7)
-    max_result_chars: int = 12_000
 
 
 class LoggingCfg(BaseModel):

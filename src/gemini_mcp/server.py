@@ -73,6 +73,12 @@ model fallbacks, minute-limit waits with seconds, failed chunks — details are 
 meta.progress_trace). If the call errored, say so
 plainly with the reset ETA. Never silently swallow retries, waits or fallbacks.
 
+LENGTH (required): ask Gemini for a SHORT answer by default — say so in words inside
+'task' ("answer in 3-5 sentences", "conclusions only"). Ask for the full treatment
+only when the task actually calls for it. Nothing on the server shortens an answer
+for you: there is no length cap, so an over-long request is returned in full and
+lands in your context. meta.result_chars says how long what you got is.
+
 FILE INGEST: the flow is ticket → upload → analyze_file (the exact steps ride in the
 quota_status and raw_document_inlined payloads). What only this text can say is how to
 move the bytes: ONE command, `curl -T <file> '<upload_url>'` through the :8790 tunnel —
@@ -152,7 +158,6 @@ def build_server(deps: Deps) -> MCPServer:
         chunk_tokens: int | None = None,
         overlap_ratio: float | None = None,
         request_id: str | None = None,
-        result_max_chars: int | None = None,
         wait_seconds: int | None = 25,
         ctx: Context | None = None,
     ) -> dict:
@@ -188,14 +193,13 @@ def build_server(deps: Deps) -> MCPServer:
             overlap_ratio: override chunk overlap (0..0.5).
             request_id: idempotency key — repeating it returns the cached result;
                 also the handle for the async ticket flow below.
-            result_max_chars: cap on the returned consolidated text.
             wait_seconds: max seconds to hold this call inline (default 25). Longer
                 jobs return {status:'running', request_id} and keep computing
                 server-side — fetch the outcome with analyze_result(request_id).
                 None = block until finished (legacy behavior, risks client timeouts).
 
         Returns: {report, result, meta{models_used, chunks{count,failed},
-        requests_spent, cache_hits, quota_after, elapsed_s, truncated,
+        requests_spent, cache_hits, quota_after, elapsed_s, result_chars,
         progress_trace}} or {status:'running', request_id, elapsed_s, poll} while
         the job computes.
         Errors: quota_exhausted / plan_budget_insufficient — JSON with per_model
@@ -208,7 +212,7 @@ def build_server(deps: Deps) -> MCPServer:
             "model": model, "overflow": overflow, "route": route,
             "wait": wait_for_minute_limits,
             "chunk_tokens": chunk_tokens, "overlap_ratio": overlap_ratio,
-            "request_id": request_id, "result_max_chars": result_max_chars},
+            "request_id": request_id},
             wait_seconds,
             lambda em, pr: analyze_large_tool(deps, em, pr))
 
@@ -302,7 +306,6 @@ def build_server(deps: Deps) -> MCPServer:
         chunk_tokens: int | None = None,
         overlap_ratio: float | None = None,
         request_id: str | None = None,
-        result_max_chars: int | None = None,
         wait_seconds: int | None = 25,
         ctx: Context | None = None,
     ) -> dict:
@@ -340,8 +343,7 @@ def build_server(deps: Deps) -> MCPServer:
             "output_format": output_format, "max_output_tokens": max_output_tokens,
             "model": model, "overflow": overflow, "route": route,
             "wait": wait_for_minute_limits, "chunk_tokens": chunk_tokens,
-            "overlap_ratio": overlap_ratio, "request_id": request_id,
-            "result_max_chars": result_max_chars},
+            "overlap_ratio": overlap_ratio, "request_id": request_id},
             wait_seconds,
             lambda em, pr: analyze_file_tool(deps, em, pr))
 
@@ -359,7 +361,6 @@ def build_server(deps: Deps) -> MCPServer:
         chunk_tokens: int | None = None,
         overlap_ratio: float | None = None,
         request_id: str | None = None,
-        result_max_chars: int | None = None,
         wait_seconds: int | None = 25,
         ctx: Context | None = None,
     ) -> dict:
@@ -381,8 +382,7 @@ def build_server(deps: Deps) -> MCPServer:
             "output_format": output_format, "max_output_tokens": max_output_tokens,
             "model": model, "overflow": overflow, "route": route,
             "wait": wait_for_minute_limits, "chunk_tokens": chunk_tokens,
-            "overlap_ratio": overlap_ratio, "request_id": request_id,
-            "result_max_chars": result_max_chars},
+            "overlap_ratio": overlap_ratio, "request_id": request_id},
             wait_seconds,
             lambda em, pr: analyze_files_tool(deps, em, pr))
 

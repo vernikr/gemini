@@ -43,7 +43,6 @@ class AnalyzeParams:
     chunk_tokens: int | None = None
     overlap_ratio: float | None = None
     request_id: str | None = None
-    result_max_chars: int | None = None
     source: str = "mcp"
     route: str = "optimal"                  # router already selected upstream (tools)
 
@@ -108,10 +107,10 @@ class Pipeline:
                 text, chunks_meta = await self._chunked(p, body, measured, chunk_tokens,
                                                         thinking, on_ev)
 
-        limit = p.result_max_chars or cfgp.max_result_chars
-        truncated = len(text) > limit
-        if truncated:
-            text = text[:limit]
+        # No length cap. The answer is bounded by the model's own output ceiling;
+        # cutting it here would discard work already paid for and could land
+        # mid-sentence. `result_chars` is a measurement, not a limit — it is what a
+        # consumer needs in order to warn a human about an unusually long answer.
         await self.em.stage("done", 100,
                             f"done in {time.time() - t0:.1f}s: spent {self._spends} "
                             f"request(s), {self._cache_hits} cache hit(s)",
@@ -123,7 +122,7 @@ class Pipeline:
             "measured_tokens": measured, "chunks": chunks_meta,
             "requests_spent": self._spends, "cache_hits": self._cache_hits,
             "quota_after": self.router.model_budgets(),
-            "elapsed_s": round(time.time() - t0, 1), "truncated": truncated,
+            "elapsed_s": round(time.time() - t0, 1), "result_chars": len(text),
             "progress_trace": self.em.trace,
         }
         return text, meta

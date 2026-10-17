@@ -152,8 +152,8 @@ overflow tiers if opted in.
 5. `consolidate`: task + numbered chunk answers + overlap-dedup instruction →
    router.complete(kind=consolidate); if stitched input > limit → recursive tree-reduce
    (round r+1 consolidates groups of `consolidation_fanin` summaries).
-6. `assemble`: result ≤ `result_max_chars` + meta (models_used, spent, quota_after,
-   progress_trace, chunks_failed).
+6. `assemble`: result as the model returned it + meta (models_used, spent, quota_after,
+   progress_trace, chunks_failed, result_chars). No length cap — see BR1.
 
 **Progress mapping** (FR-E1..3): every RouterEvent/pipeline stage →
 `ctx.report_progress(pct, message)` (when progressToken present) AND `ctx.info(message)`
@@ -251,7 +251,6 @@ pipeline:
   overlap_ratio: 0.10
   consolidation_fanin: 6              # recursive reduce group size
   fail_on_chunk_error: true
-  max_result_chars: 12000
 thinking: {default: medium}
 server: {http_port: 8790, http_bind: 127.0.0.1, auth: bearer}
 logging: {log_max_bytes: 10485760, log_backups: 7, jsonl_keep_days: 14,

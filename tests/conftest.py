@@ -157,7 +157,7 @@ class NullAudit:
 
 def make_app_cfg(log_dir="logs", **pipeline_over) -> AppCfg:
     pipe = {"chunk_threshold_tokens": 100, "chunk_size_tokens": 60, "overlap_ratio": 0.2,
-            "consolidation_fanin": 2, "max_result_chars": 12000,
+            "consolidation_fanin": 2,
             "fail_on_chunk_error": True}
     pipe.update(pipeline_over)
     return AppCfg.model_validate({"pipeline": pipe, "logging": {"dir": str(log_dir)}})

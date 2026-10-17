@@ -123,11 +123,15 @@ async def test_chunk_failure_aborts_by_default():
     assert len(chunk_calls) == 2                                 # stopped at failure
 
 
-async def test_result_truncation():
+async def test_the_answer_is_never_cut_and_its_length_is_reported():
+    """BR1 (revised): no hard length cap. Cutting here would discard work already
+    paid for and could land mid-sentence; the consumer gets the measurement and
+    decides whether an answer is worth flagging to a human."""
     router = FakeRouter()
-    text, meta = await _run(router, make_app_cfg(),
-                            AnalyzeParams(task="t", body="tiny", result_max_chars=6))
-    assert len(text) == 6 and meta["truncated"] is True
+    text, meta = await _run(router, make_app_cfg(), AnalyzeParams(task="t", body="tiny"))
+    assert text                                   # nothing was dropped
+    assert meta["result_chars"] == len(text)      # and the length is a fact, not a limit
+    assert "truncated" not in meta
 
 
 async def test_thinking_default_and_override():

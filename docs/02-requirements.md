@@ -8,7 +8,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 
 | ID | Requirement | Success measure |
 |---|---|---|
-| BR1 | The Freebuff agent offloads massive-body analysis to the gateway and receives only a compact consolidated result — its own context stays clean | Result body ≤ `max_result_chars`; no intermediate chunk texts in the tool return |
+| BR1 | The Freebuff agent offloads massive-body analysis to the gateway and receives only a compact consolidated result — its own context stays clean | No intermediate chunk texts in the tool return; `meta.result_chars` reports the length. No hard cap: the answer is bounded by the model's own output ceiling, and cutting it would discard work already spent. Brevity is asked for in the prompt, not enforced here |
 | BR2 | Quota is never spent blind: every request is pre-checked against remaining RPD/RPM/TPM, and every spend is persisted | Zero unexplained 429s in the audit log; ledger survives restarts |
 | BR3 | "Which model can I send to right now?" is answerable in one command / one MCP call, by any consumer | `quota_status` tool + `gemini-router quota` CLI show per key×model: RPD left, RPM/TPM window state, cooldowns, reset ETA, recommended target |
 | BR4 | The router is reusable outside this stack (Python dep, REST, MCP) | `uv add git+…/gemini-router.git@vX` works in a foreign project; REST `/v1/*` documented |
@@ -41,8 +41,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   "wait_for_minute_limits": true,                // optional, default: true — wait out RPM/TPM gates (FR-C13)
   "chunk_tokens": 180000,                        // optional override of chunk_size_tokens
   "overlap_ratio": 0.10,                         // optional override
-  "request_id": "caller-side idempotency key",   // optional; replays return cached result
-  "result_max_chars": 12000                      // optional cap on returned consolidated text
+  "request_id": "caller-side idempotency key"    // optional; replays return cached result
 }
 ```
 
