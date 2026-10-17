@@ -2,7 +2,7 @@ name: release
 # Dual-publish on tag v*: test (public-registry deps) → PyPI (trusted publishing,
 # OIDC — no API token in secrets) → npm shim (provenance) → consumer smoke against
 # the live registries. One-time store setup: docs/09-ci.md. Manual fallback (until
-# stores are configured): docs/05-packaging.md "Publishing".
+# stores are configured): docs/worklog/archive/05-packaging.md "Publishing".
 on:
   push:
     tags: ["v*"]
@@ -11,6 +11,12 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+      # PyPI rejects an OIDC identity that tries to CREATE a project (400
+      # "Non-user identities cannot create new projects"), and the trust record is
+      # keyed by repository slug — so renaming the repo invalidates the publisher
+      # for the old dist name and leaves the new one unregistered. Both are manual:
+      # pypi.org/manage/account/publishing/, matching owner, repo, workflow filename
+      # and the `pypi` environment below. Publish fails here, and only here.
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
