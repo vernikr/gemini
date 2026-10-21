@@ -1,5 +1,10 @@
 # gemini
 
+## Install in OmniRush
+
+Use **Library → Advanced settings → From GitHub** with this repository URL. See [plugin installation and prerequisites](docs/omnirush-plugin.md).
+
+
 MCP gateway for **massive-payload Gemini analysis on the AI Studio free tier**.
 Runs on a small VPS; a local Freebuff Desktop agent sends huge bodies to it and gets back
 a compact consolidated result — the agent's own context stays clean.
