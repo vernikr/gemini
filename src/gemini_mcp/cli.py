@@ -265,12 +265,14 @@ def _project_root() -> Path | None:
     return None
 
 
-def _bootstrap_env() -> None:
+def _bootstrap_env(argv: list[str] | None = None) -> None:
     """Bare launches (Freebuff → ``ssh root@vps …/gemini stdio``) start with
     cwd=$HOME and an empty env: the systemd EnvironmentFile does not apply there.
     Anchor cwd to the project root and load its .env (without overriding already-set
-    vars) so keys, config.yaml and logs/ behave identically on every transport."""
-    if root := _project_root():
+    vars) so keys, config.yaml and logs/ behave identically on every transport.
+    An explicit --config owns the working directory and is left alone."""
+    explicit = any(a == "--config" or a.startswith("--config=") for a in (argv or []))
+    if not explicit and (root := _project_root()):
         try:
             os.chdir(root)
         except OSError:
@@ -379,7 +381,7 @@ class _FriendlyParser(argparse.ArgumentParser):
 
 
 def main(argv: list[str] | None = None) -> int:
-    _bootstrap_env()
+    _bootstrap_env(argv)
     ap = _FriendlyParser(
         prog="gemini",
         description="Gemini free-tier MCP gateway — one key pool (or one server), shared "

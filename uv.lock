@@ -222,52 +222,18 @@ wheels = [
 ]
 
 [[package]]
-name = "gemini-mcp-gateway"
-version = "0.25.1"
-source = { editable = "." }
-dependencies = [
-    { name = "gemini-router" },
-    { name = "mcp", extra = ["cli"] },
-    { name = "python-dotenv" },
-    { name = "pyyaml" },
-    { name = "rich" },
-    { name = "starlette" },
-    { name = "uvicorn" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-asyncio" },
-    { name = "respx" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "gemini-router", git = "https://github.com/vernikr/gemini-router.git?tag=v0.4.2" },
-    { name = "mcp", extras = ["cli"], specifier = ">=1.9" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
-    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
-    { name = "python-dotenv", specifier = ">=1.0" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
-    { name = "rich", specifier = ">=13.7" },
-    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
-    { name = "starlette", specifier = ">=0.37" },
-    { name = "uvicorn", specifier = ">=0.30" },
-]
-provides-extras = ["dev"]
-
-[[package]]
 name = "gemini-router"
-version = "0.4.2"
-source = { git = "https://github.com/vernikr/gemini-router.git?tag=v0.4.2#916083b92341751c0f362936e5ad9b026545a5b9" }
+version = "0.12.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pyyaml" },
     { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/bf/6d/f41a33423c4f1099cd3b1aee991273b1c8f0b30c57fd8b316274f34e94d5/gemini_router-0.12.0.tar.gz", hash = "sha256:77e3ee6bf75039015ce91b3a0bcf03bda12eabdd477df8abf2df9610d9f3b352", size = 193644, upload-time = "2026-10-27T23:35:22.385Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/eb/83/49289ea6de69f82a046be6b9ecfd3cf0e5dca1a5c11acdbeed84234e985b/gemini_router-0.12.0-py3-none-any.whl", hash = "sha256:f7418ed065e78f259c7150cc244c8dd7126cf7014f4a3acacf34de0e7a0180ce", size = 82860, upload-time = "2026-10-27T23:35:21.237Z" },
 ]
 
 [[package]]
@@ -984,3 +950,41 @@ sdist = { url = "https://files.pythonhosted.org/packages/da/34/30e9280707135d2cf
 wheels = [
     { url = "https://files.pythonhosted.org/packages/38/0c/b54a4fdd7f90a3af8b02ebc9ce6712c2c208b7926a2f7bad95c33ebbe943/uvicorn-0.54.0-py3-none-any.whl", hash = "sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf", size = 87427, upload-time = "2026-09-25T06:52:35.829Z" },
 ]
+
+[[package]]
+name = "vernikr-gemini"
+version = "0.26.1"
+source = { editable = "." }
+dependencies = [
+    { name = "gemini-router" },
+    { name = "mcp", extra = ["cli"] },
+    { name = "python-dotenv" },
+    { name = "pyyaml" },
+    { name = "rich" },
+    { name = "starlette" },
+    { name = "uvicorn" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "pytest-asyncio" },
+    { name = "respx" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "gemini-router", specifier = ">=0.12.0,<0.13" },
+    { name = "mcp", extras = ["cli"], specifier = ">=1.9" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
+    { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
+    { name = "rich", specifier = ">=13.7" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "starlette", specifier = ">=0.37" },
+    { name = "uvicorn", specifier = ">=0.30" },
+]
+provides-extras = ["dev"]
