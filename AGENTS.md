@@ -41,3 +41,5 @@ functional changes, and risks documented alongside affected features). Repo-spec
   what a reader cannot get from `pyproject.toml`, `--version` or `pytest`.
 - The two release-workflow lockstep guards (pyproject version == tag, npm version == tag)
   stay: they protect a real cross-artifact invariant, not a documentation claim.
+
+- For native GitHub sub-issues, ensure `.github/workflows/issue-parent-sync.yml` exists with `issues: [opened, edited]`, `permissions: issues: write`, and a job calling `vernikr/mother/.github/workflows/issue-parent-sync.yml@v1` (create the caller workflow if missing); then put `<!-- issue-parent: #N -->` on its own line in the child Issue body, or use `<!-- issue-parent: none -->` to detach.
