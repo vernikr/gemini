@@ -32,17 +32,19 @@ def tts_progress(
         TextColumn("{task.description}", markup=False),
         BarColumn(bar_width=28),
         TaskProgressColumn(),
+        TextColumn("{task.fields[eta]}", style="dim", justify="right"),
         console=console,
         transient=False,
         refresh_per_second=10,
         disable=not (enabled and console.is_terminal),
     )
     with progress:
-        task = progress.add_task("Preparing audio", total=100)
+        task = progress.add_task("Preparing audio", total=100, eta="")
         completed = 0.0
+        eta_text = ""
 
         def report(event: RouterEvent) -> None:
-            nonlocal completed
+            nonlocal completed, eta_text
             if event.pct is not None:
                 completed = max(completed, min(100.0, float(event.pct)))
 
@@ -50,24 +52,29 @@ def tts_progress(
             if event.stage == "file_progress":
                 description = str(event.detail.get("label") or "Preparing audio")
                 eta_s = event.detail.get("eta_s")
+                eta_text = f"· ~{_format_eta(eta_s)}" if eta_s is not None else ""
             elif event.stage == "waiting":
                 description = "Waiting"
                 eta_s = event.wait_s
+                eta_text = f"· ~{_format_eta(eta_s)}" if eta_s is not None else ""
             elif event.stage == "dispatch":
                 chunk, chunks = event.detail.get("chunk"), event.detail.get("chunks")
                 description = f"TTS · {chunk}/{chunks}" if chunk and chunks else "TTS"
+                eta_text = ""
             elif event.stage == "retry":
                 chunk, chunks = event.detail.get("chunk"), event.detail.get("chunks")
                 description = f"Retry · {chunk}/{chunks}" if chunk and chunks else "Retry"
+                eta_text = ""
             elif event.stage == "switch":
                 chunk, chunks = event.detail.get("chunk"), event.detail.get("chunks")
                 description = f"Switch · {chunk}/{chunks}" if chunk and chunks else "Switch"
+                eta_text = ""
             else:
                 return
 
-            if eta_s is not None:
-                description += f" · ~{_format_eta(eta_s)}"
-            progress.update(task, completed=completed, description=description)
+            progress.update(
+                task, completed=completed, description=description, eta=eta_text
+            )
             progress.refresh()
 
         yield report
