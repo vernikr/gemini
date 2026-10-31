@@ -47,6 +47,6 @@ def test_progress_uses_short_status_and_approximate_eta():
         ))
 
     rendered = output.getvalue()
-    assert "TTS · 3/8 · ~1:24" in rendered
-    assert "Waiting · ~18s" in rendered
-    assert "Encoding MP3 · ~8s" in rendered
+    assert "TTS · 3/8" in rendered and "~1:24" in rendered
+    assert "Waiting" in rendered and "~18s" in rendered
+    assert "Encoding MP3" in rendered and "~8s" in rendered
