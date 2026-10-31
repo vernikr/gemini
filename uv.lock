@@ -223,7 +223,7 @@ wheels = [
 
 [[package]]
 name = "gemini-router"
-version = "0.13.0"
+version = "0.14.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -231,9 +231,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/3e/9f/dd5cbf24406905e5c85fcfb78054d0fe34a02053e0770ea5e8541bd5e19e/gemini_router-0.13.0.tar.gz", hash = "sha256:546c7601fb15bf6017d57b9fd75f39ca29f3061f90e79c0ae32391fcae9414b4", size = 205251, upload-time = "2026-10-31T16:34:34.489Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/a3/94/64b252689725caea1aab76e61a5e2b48de80150a54bb25c00ac3181cf630/gemini_router-0.14.0.tar.gz", hash = "sha256:857468ed4089ad8e1304ea9431de2aeea39e816d9c1818ad620c6171f4f7e2c2", size = 189494, upload-time = "2026-10-31T19:01:51.775Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/27/35/15178f1c11765a0cce1dd49ab5ff936855eb99e2e1b7d246ff4e7fc38736/gemini_router-0.13.0-py3-none-any.whl", hash = "sha256:87d7264073f14ebc1b00b5a23d4f2c12a6b683547267183fb52c7330122a391a", size = 91212, upload-time = "2026-10-31T16:34:32.76Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/35/5a8c5ce7f33bac2eba208de318d831dd2e299f94b3280b4037bdde2e9988/gemini_router-0.14.0-py3-none-any.whl", hash = "sha256:40b166c7cd1cae4abbb9331d26a183f68844466a694790932d2fafb1652aef0e", size = 92913, upload-time = "2026-10-31T19:01:50.256Z" },
 ]
 
 [[package]]
@@ -953,7 +953,7 @@ wheels = [
 
 [[package]]
 name = "vernikr-gemini"
-version = "0.27.0"
+version = "0.28.0"
 source = { editable = "." }
 dependencies = [
     { name = "gemini-router" },
@@ -975,7 +975,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "gemini-router", specifier = ">=0.13.0,<0.14" },
+    { name = "gemini-router", specifier = ">=0.14.0,<0.15" },
     { name = "mcp", extras = ["cli"], specifier = ">=1.9" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24" },
