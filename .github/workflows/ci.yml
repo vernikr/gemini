@@ -28,3 +28,8 @@ jobs:
           uv venv .venv-ci
           UV_NO_SOURCES=1 uv pip install --refresh-package gemini-router --python .venv-ci/bin/python -e ".[dev]"
       - run: .venv-ci/bin/pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm test
+        working-directory: packaging/npm

@@ -56,9 +56,7 @@ def test_help_lists_the_recently_added_commands(capsys):
 
 # ------------------------------------------------------------------ the secrets guard
 def test_the_guard_flags_a_real_shaped_key_and_accepts_marked_fakes(tmp_path):
-    """The guard exists because on 2026-10-11 two real keys were committed into a public
-    test fixture and the vendor reported the first as leaked within the hour. The rule for
-    fixtures: real shape, DUMMY marker. Pinned both directions."""
+    """Credential-shaped literals are rejected unless fixtures carry the DUMMY marker."""
     from gemini_mcp import secrets_guard as guard
 
     # built at runtime so the guard scanning THIS file stays happy (it is its own test)

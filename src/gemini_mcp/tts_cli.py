@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 from gemini_router import Router
+from gemini_router.cli_progress import tts_progress
 from gemini_router.config import Config as RouterConfig
 from rich.prompt import Prompt
 
@@ -34,7 +35,7 @@ def _profile(args, console) -> FleetProfile:
     return FleetProfile(host=host, user=user)
 
 
-async def _synthesize(router: Router, args, source: Path, output: Path, console):
+async def _synthesize(router: Router, args, source: Path, output: Path, on_event):
     try:
         return await router.synthesize_file(
             source,
@@ -46,14 +47,14 @@ async def _synthesize(router: Router, args, source: Path, output: Path, console)
             source="gemini-cli",
             initiator="gemini-cli",
             request_id=args.request_id,
-            on_event=lambda event: console.print(f"[dim]{event.message()}[/dim]"),
+            on_event=on_event,
         )
     finally:
         await router.aclose()
 
 
-def _run_with_router(router: Router, args, source: Path, output: Path, console):
-    return asyncio.run(_synthesize(router, args, source, output, console))
+def _run_with_router(router: Router, args, source: Path, output: Path, on_event):
+    return asyncio.run(_synthesize(router, args, source, output, on_event))
 
 
 def _remote_router_config(router_cfg: RouterConfig, proxy: FleetProxy) -> RouterConfig:
@@ -105,11 +106,13 @@ def run_tts(args, app_cfg: AppCfg, router_cfg: RouterConfig, console) -> int:
                 f"[dim]VPS router {proxy.server_version}; forwarding privately over SSH[/dim]"
             )
             router = Router(_remote_router_config(router_cfg, proxy))
-            result = _run_with_router(router, args, source, output, console)
+            with tts_progress(console, enabled=not args.json) as on_event:
+                result = _run_with_router(router, args, source, output, on_event)
     else:
         router, optimal, mode = make_routers(app_cfg, router_cfg)
         try:
-            result = _run_with_router(router, args, source, output, console)
+            with tts_progress(console, enabled=not args.json) as on_event:
+                result = _run_with_router(router, args, source, output, on_event)
         finally:
             if optimal:
                 asyncio.run(optimal.aclose())

@@ -5,8 +5,8 @@ survive "return in a month, install on a new machine". A script you must clone f
 not; `gemini skill install` does, because it ships inside the wheel next to the file
 it copies.
 
-Mechanics follow the pattern the research-workspace skills proved out — a manifest of what
-*we* put there, so uninstall can never touch someone else's skill.
+An on-disk manifest records which directories this command manages, so uninstall never
+touches an unrelated skill.
 """
 from __future__ import annotations
 
@@ -15,10 +15,9 @@ from importlib import resources
 from pathlib import Path
 
 SKILL_NAME = "gemini"
-# The manifest FILENAME is on-disk state, not branding: renaming it would orphan the
-# uninstall record of every existing install. What it RECORDS is what changed.
+# This filename is persistent state shared by install, status, and uninstall.
 MANIFEST = ".gemini-mcp-skill.manifest"
-LEGACY_NAMES = ("gemini-mcp",)   # shipped under this name before the rename
+ALTERNATE_SKILL_NAMES = ("gemini-mcp",)
 
 # Loader order, later overriding earlier. ~/.agents/skills is the interoperable one
 # (Codex, Cursor, Copilot, Gemini CLI, OpenCode, Freebuff); ~/.claude/skills is the only
@@ -44,15 +43,14 @@ def skill_text() -> str:
     return raw.replace(_PLACEHOLDER, BREVITY_RULE)
 
 
-def _retire_legacy(dir_: Path) -> None:
-    """Remove skill dirs an earlier version of this command installed under an old name.
+def _remove_duplicate_skills(dir_: Path) -> None:
+    """Remove alternate skill folders before writing the managed copy.
 
-    Without this the rename leaves the previous skill on disk beside the new one and the
-    loader picks up both, so a stale copy keeps teaching last release's policy.
+    This keeps agent loaders from finding competing copies of the same skill.
     """
     manifest = dir_ / MANIFEST
     recorded = manifest.read_text("utf-8").split() if manifest.is_file() else []
-    for name in dict.fromkeys((*recorded, *LEGACY_NAMES)):
+    for name in dict.fromkeys((*recorded, *ALTERNATE_SKILL_NAMES)):
         if name == SKILL_NAME:
             continue
         target = dir_ / name
@@ -62,11 +60,7 @@ def _retire_legacy(dir_: Path) -> None:
 
 
 def _owned(dir_: Path) -> list[str]:
-    """Names this command put in `dir_`, per the manifest.
-
-    The manifest, not SKILL_NAME, is the authority: after a rename the recorded name is
-    the old one, and keying off today's constant would strand that directory forever.
-    """
+    """Return managed skill names recorded in this directory's manifest."""
     manifest = dir_ / MANIFEST
     if not manifest.is_file():
         return []
@@ -89,7 +83,7 @@ def install(*, print_only: bool = False) -> int:
             print(f"would write {dest}/SKILL.md ({len(body)} chars)")
             continue
         dir_.mkdir(parents=True, exist_ok=True)
-        _retire_legacy(dir_)
+        _remove_duplicate_skills(dir_)
         if dest.exists():
             shutil.rmtree(dest)          # a stale copy must not survive an upgrade
         dest.mkdir(parents=True)

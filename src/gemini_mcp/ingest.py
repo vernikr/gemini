@@ -1,12 +1,11 @@
-"""File ingest (M4.5, docs/03-architecture.md §10): HMAC one-time upload tickets,
-atomic inbox storage, text sniffing (binary fail-fast, ZERO quota spend), a minimal
-server-side RTF→text extractor (D11: the client stays maximally light) and retention
-pruning. Upload channels: HTTP PUT to a signed /v1/upload/<id> (signature IS the
-auth, bearer-exempt) or plain scp to inbox/<id> (SSH key is the auth).
+"""File ingest for the Gemini gateway.
 
-Input routing: text the server can extract (pandoc set, RTF, plain) keeps the text
-pipeline; PDF, images, audio and video go to the provider's Files API — `media_kind`
-decides, `sniff_binary` still rejects everything that is neither."""
+Upload tickets are HMAC-signed, size- and TTL-bound, and single-use. Uploads are stored
+atomically in the configured inbox, inspected before generation, and pruned according to
+the configured retention policy. Supported text formats use extraction and the chunked
+pipeline; provider-supported media is sent through the Files API. Unsupported input fails
+before quota is spent.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -323,7 +322,7 @@ def pandoc_to_markdown(data: bytes, fmt: str, timeout_s: int = 60) -> str | None
             Path(src).unlink(missing_ok=True)
 
 
-# ---------- minimal RTF → text (D11) ----------
+# ---------- RTF → text ----------
 
 _JUNK_GROUPS = {"fonttbl", "colortbl", "stylesheet", "info", "generator", "pict",
                 "themedata", "colorschememapping", "latentstyles", "datastore",

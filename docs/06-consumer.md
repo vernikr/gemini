@@ -1,345 +1,138 @@
-# 06 · Consumer guide (no server needed)
+# Consumer guide
 
-gemini in **direct mode**: your machine → Google AI Studio free tier. No VPS, no
-router, no daemon — one wizard run, then paste a JSON block into your MCP client.
+Gemini runs against Google AI Studio in **Direct** mode or through a configured
+**Router/Fleet** backend. Both modes expose the same MCP interface. A server is optional.
 
-## 1. Install & setup (once)
-
-Any of these runs the same core (`vernikr-gemini` on PyPI):
+## Install and configure
 
 ```bash
-pnpm dlx @vernikr/gemini setup      # pnpm-first (npm shim; uv bootstrapped via npx)
-npx -y @vernikr/gemini setup        # npm/npx equivalent
-uvx --from vernikr-gemini gemini setup   # pure Python toolchain
+pnpm dlx @vernikr/gemini setup
+# or
+npx -y @vernikr/gemini setup
+# Python-only installation
+uvx --from vernikr-gemini gemini setup
 ```
 
-The wizard: fleet-vs-simple question (pick **1 Simple**) → key intake — masked paste,
-read from a file, or skip. The hidden-paste path is guarded because toggling tty echo
-can crash macOS Terminal.app; the file option never touches tty modes. Get keys free at
-https://aistudio.google.com/app/apikey — several keys = several times the quota → live listModels probe → writes `~/.config/gemini/`:
+Choose Direct to use a local key pool and ledger, or Router to connect to a fleet service.
+The wizard stores user configuration under `~/.config/gemini/`; key files are protected
+with mode `0600`. It can print or write supported MCP client entries.
 
-| File | Contents |
-|---|---|
-| `.env` (0600) | `GEMINI_API_KEYS=…` — the only place keys live |
-| `config.yaml` | `backend: direct` + `logging.dir` under the same home |
-| `state.db` | local usage ledger (created on first call; survives restarts) |
-
-Non-interactive: `… setup --backend direct --keys-file keys.txt --write-client
-freebuff --json` (machine-readable report: `ok`, `steps`, `verify_prompt`, and every
-failure with a `fix` — built for AI agents; see README §Quick start).
-Undo everything: `… uninstall --yes`.
-
-## Local text-to-speech CLI
+For non-interactive setup:
 
 ```bash
-gemini tts notes.md                         # writes notes.mp3 next to the source
+npx -y @vernikr/gemini setup --backend direct \
+  --keys-file /absolute/path/keys.txt --write-client freebuff --json
+```
+
+The npm launcher checks PyPI for a newer Python core on normal CLI starts. If PyPI is
+unreachable, it runs the Python version paired with the installed launcher. Disable the
+check for one invocation with `--no-update`, or set `GEMINI_AUTO_UPDATE=0` in the client
+environment. `--help` and `--version` do not query the registry. The Python package itself
+can be version-pinned through `uvx --from 'vernikr-gemini==X.Y.Z' gemini ...`.
+
+## TTS
+
+```bash
+gemini tts notes.md
 gemini tts notes.txt --voice Kore --style "Warm, measured delivery"
 gemini tts notes.md --output ~/Audio/notes.mp3 --bitrate 128
 ```
 
-Only UTF-8 `.txt` and `.md` files are accepted. The command produces one mono MP3 with
-`gemini-3.8-flash-tts`; voice and style are optional, the default bitrate is 128 kbps,
-and `--no-wait` opts out of waiting for a minute quota window. Multi-speaker output and
-streaming are not supported. Paragraphs are chunked first, then sentences; the complete
-file is preflighted against the TTS quota before any audio is generated. The completed
-MP3 stays at the selected local path (at least 24 hours); failed synthesis removes partial
-output. The local machine needs `ffmpeg` for MP3 encoding.
+TTS accepts UTF-8 `.txt` and `.md`, writes one mono MP3, and uses `ffmpeg` for encoding.
+The default bitrate is 128 kbps. `--voice`, `--style`, `--output`, `--bitrate`, and
+`--no-wait` control synthesis. Direct mode uses the local key pool. Router mode reads the
+proxy token over SSH into memory and uses a temporary loopback-only tunnel; the token is
+not persisted in the local profile.
 
-In **direct mode**, the local API-key pool is used. In **router mode**, the VPS key pool
-is used: `setup --backend router` stores the VPS host and SSH user (no credentials) in
-`~/.config/gemini/fleet.json`. The CLI reads the proxy token over SSH into memory, opens
-a temporary tunnel bound only to `127.0.0.1`, and closes it when the job ends. The token
-is never written to disk or printed. SSH public-key access and a trusted host key must
-already be configured. Override the saved target for one command with `--vps-host` and
-`--vps-user`.
+In an interactive terminal the TTS command displays a spinner, progress bar, and
+percentage. Progress is deterministic: completed synthesis chunks advance the bar, and
+MP3 encoding completes it. Quota waits and provider retries update the status text without
+inventing time-based progress. `--json` produces machine-readable output without the bar.
 
-## 2. Add to your MCP client (JSON)
+## MCP configuration
 
-`setup` **prints** the JSON block and can also **write** it itself:
-`--write-client freebuff|claude|cursor` (repeatable) merges the `gemini` entry into
-that client's config with a timestamped `.bak` backup; a broken existing JSON is
-never clobbered — you get a `fix` instead. The printout is mode-aware: direct mode
-and a successfully deployed fleet both end with the same paste-now block and a
-numbered checklist (`steps` + highlighted `verify_prompt` in the report); only if the
-fleet auto-deploy can't run (missing host, no git/ssh auth, Windows) it falls back to
-short numbered manual steps. Two wiring forms:
-
-- **After the wizard** (option A): keys already live in `~/.config/gemini/.env` —
-  the block below needs no env.
-- **Without the wizard** (option B, JSON-only): add `"env": {"GEMINI_API_KEYS":
-  "AIza…key1,AIza…key2"}` to the server entry — that alone is sufficient; backend
-  auto-resolves to `direct`, logs+ledger still land in `~/.config/gemini/`
-  (bare-launch default). Trade-off: keys sit in the client config file, not a 0600 .env.
-  More private JSON-only form — point at a keys FILE instead of inlining secrets:
-  `"env": {"GEMINI_MCP_KEYS_FILE": "/absolute/path/keys.txt"}`.
-
-### Key sources (priority high → low)
-
-| Source | Example |
-|---|---|
-| CLI argument | `gemini --keys 'AIza…' stdio` — visible in `ps`/history, last resort |
-| CLI file | `gemini --keys-file ~/keys.txt stdio` |
-| env → file | `GEMINI_MCP_KEYS_FILE=/abs/path/keys.txt` (client-JSON `env` friendly) |
-| config.yaml | `router:` → `keys_file: ~/keys.txt` |
-| env inline | `GEMINI_API_KEYS=AIza…,AIza…` (`setup`'s `.env`, or client-JSON `env`) |
-
-Keys-file format: comma/whitespace/newline separated, `#` comments ignored, deduped.
-`setup` also accepts `--keys-file` (merged with `--keys`).
-
-### Growing or rotating the pool later
-
-```bash
-gemini keys                 # where the pool lives + fingerprints (never raw keys)
-gemini keys add <key>…      # validate → live probe (listModels, free) → write 0600
-gemini keys remove <n|fp>   # by index or fingerprint; the last key needs --force
-```
-
-The command finds the right file by itself — the systemd unit's `EnvironmentFile` on a
-server, the wizard's `.env` on a workstation — and restarts the service when there is one
-(`--no-restart` skips that).
-
-On the VPS the command is on PATH for every shell (`/usr/local/bin/gemini`); when a
-host says `command not found` while the tool is installed, that shim is the missing piece.
-
-Both key generations work and neither needs a decision from you: classic `AIza…` (Cloud
-Console) and newer `AQ.…` (AI Studio). The probe runs the same code the daemon runs, and
-when a key turns out to need a different transport it says so (`ok (query)`) and keeps
-that choice for the process. A key the provider has blocked as leaked is named as such,
-with what to do about it, instead of a bare 403. Several keys = several times the daily allowance, because
-quota is counted per key × model; the router spreads calls across the pool by remaining
-budget and steps past an exhausted or rejected key on its own.
-
-The gateway auto-discovers `~/.config/gemini/` — **no other env vars needed**.
-
-### Freebuff Desktop — `~/.agents/mcp.json`
+The setup wizard can write a supported client's configuration. A typical local Direct
+entry is:
 
 ```json
 {
   "mcpServers": {
     "gemini": {
       "command": "npx",
-      "args": ["-y", "@vernikr/gemini", "stdio"]
+      "args": ["-y", "@vernikr/gemini", "stdio"],
+      "env": { "GEMINI_AUTO_UPDATE": "0" }
     }
   }
 }
 ```
 
-### Claude Desktop — `claude_desktop_config.json`
+The `GEMINI_AUTO_UPDATE` setting is optional; omit it to keep automatic core updates
+enabled. API keys should remain in the user's Gemini configuration directory or a
+protected key file, not in the MCP JSON.
 
-(macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`)
-
-```json
-{
-  "mcpServers": {
-    "gemini": {
-      "command": "npx",
-      "args": ["-y", "@vernikr/gemini", "stdio"]
-    }
-  }
-}
-```
-
-### Cursor — `~/.cursor/mcp.json` (or Settings → MCP)
-
-```json
-{
-  "mcpServers": {
-    "gemini": {
-      "command": "npx",
-      "args": ["-y", "@vernikr/gemini", "stdio"]
-    }
-  }
-}
-```
-
-### Generic / any stdio client — uvx form (version-pinned, what `setup` prints)
-
-```json
-{
-  "mcpServers": {
-    "gemini": {
-      "command": "uvx",
-      "args": ["--from", "vernikr-gemini", "gemini", "stdio"]
-    }
-  }
-}
-```
-
-Restart the client fully after editing (configs are read at startup). First call pays a
-one-time uv resolve (~10–20 s), then it's cached.
-
-### Fleet mode instead (you DO have a server)
-
-The wizard does the whole server side. Answer its questions (or pass flags):
-
-```bash
-gemini setup --backend router --vps-host <ip> \
-  [--vps-user root] [--projects-dir ~/projects] [--keys 'AIza…' | --keys-file f]
-```
-
-It clones/updates `vernikr/gemini` + `vernikr/gemini-router` into the projects
-folder (existing clones are `git pull`ed — never re-cloned over), runs
-`scripts/run_remote.sh setup` (rsync + provision + systemd unit, output streamed),
-optionally writes your Gemini keys into the server's `.env` (0600, keys travel over
-stdin — never visible in `ps`/history), waits for `/healthz`, and prints the final
-paste-NOW snippet with your configured host. Requirements: macOS/Linux, Git access to
-the source repositories, and SSH access to the server. After a release tag, the configured
-deployment job updates the server (docs/09-ci.md).
-
-The snippet it prints (host already filled in):
+For Router mode over SSH:
 
 ```json
 {
   "mcpServers": {
     "gemini": {
       "command": "ssh",
-      "args": ["root@<YOUR_VPS>", "/root/.local/bin/gemini", "stdio"]
+      "args": ["<SSH_USER>@<YOUR_VPS_HOST>", "~/.local/bin/gemini", "stdio"]
     }
   }
 }
 ```
 
-HTTP-tunnel variant (`ssh -L 8790:127.0.0.1:8790 root@<YOUR_VPS>` running):
+The SSH account needs access to the deployed service configuration. The setup wizard can
+write the host and user to a local profile and can provision a fleet when requested.
 
-```json
-{
-  "mcpServers": {
-    "gemini-http": {
-      "type": "http",
-      "url": "http://127.0.0.1:8790/mcp",
-      "headers": { "Authorization": "Bearer $GEMINI_MCP_TOKEN" }
-    }
-  }
-}
-```
+The optional HTTP transport binds to loopback by default. For remote use, forward it over
+SSH and keep the bearer token in the client/service secret stores. Do not expose the
+listener publicly without an explicitly secured network path.
 
-## 3. Use it
+## Gateway tools
 
-Ask the agent (short-phrase template):
+| Tool | Purpose |
+|---|---|
+| `analyze_large` | Chunk and consolidate a long text request. |
+| `gemini_generate` | Make a single quota-aware completion request. |
+| `file_upload_ticket` | Reserve a bounded, short-lived upload. |
+| `analyze_file` | Analyze an uploaded file without inlining bytes into a prompt. |
+| `analyze_files` | Analyze several uploaded files in one task. |
+| `analyze_result` | Poll a job submitted for asynchronous completion. |
+| `quota_status` | Read current model/key budgets and availability. |
+| `router_logs` | Read recent calls and provider outcomes. |
 
-> через gemini разбери файл <путь>, задача: <словами>
+For files, request a ticket, upload to its `upload_url`, and pass the returned `upload_id`
+to an analysis tool. The gateway extracts supported text and uses its chunking pipeline;
+media supported by Gemini is measured and sent as a provider file. Unsupported formats
+and configured size/complexity limits fail before generation.
 
-Tools: `analyze_large` (chunked massive-body analysis), `gemini_generate` (single
-shot), `analyze_file` (upload ticket + routing: text documents are extracted and chunked,
-PDFs/images/audio are read by the provider), `analyze_files` (several uploaded files,
-one answer), `analyze_result` (async ticket poll), `quota_status`, `router_logs`. Every
-compute answer starts with a one-line `report` (`backend=direct · route=… · model=… ·
-req=N · …s · clean run`) — the agent should relay it.
-
-The one-line `report` shows EVERY distinct model used; an unrequested flash-lite or
-gemma is shown as `⚠️ model-name` even if a stronger model made the final summary.
-Relay the ⚠️ and its reason for any retry, wait, incomplete chunk, split PDF, or cost
-drift. `rough_edges=N` counts distinct wait/retry/switch episodes, not failed
-requests; repeated countdown ticks are ONE wait. If the call failed entirely,
-prefix your explanation with ⛔️ and give the recovery step. Neither sign belongs
-on a clean run. Progress `pct` is approximate but never regresses or reaches
-100% before the whole job is finished.
-
-While a job runs, each `{status:'running'}` ticket carries `live`: the current phase
-(`generating`, `waiting_rpm`/`waiting_tpm`, `chunking`, `consolidating`, …), `eta_s`
-while a quota gate is being waited out (counts down on every poll), the model, the key
-id and the latest stage line — enough to tell the user "still generating, about 40s of
-quota wait left" instead of "still running".
-
-File flow (for the agent — also returned by `quota_status` in the `file_flow` field):
-1) `file_upload_ticket(filename, size_bytes)` → 2) HTTP PUT the raw bytes to
-`upload_url` → 3) `analyze_file(upload_id, task)`. The server extracts clean text
-(pandoc) and chunks it, or — for PDFs, images and audio — sends the file to the provider
-once and asks one measured question about it; spending is accounted either way.
-Pasting raw file contents into
-`gemini_generate`/`analyze_large` is rejected (`raw_document_inlined`): markup like RTF
-is unreadable for the model (non-ASCII text survives as hex escapes).
-
-A large body that is NOT already in the agent's context — it sits in a file, or it is
-long enough that inlining it would cost the window — must not be pasted into
-`analyze_large`: `body` is an argument, so it passes through the agent's context on
-the way. Write it to a file and use `file_upload_ticket` + `analyze_file`; text
-documents are extracted server-side and run the same chunked pipeline, so nothing is
-lost and the bytes never enter the context. The CLI takes the same route in one step
-(`gemini analyze --body-file <path>`, or the body on stdin).
-
-Several files, one answer: repeat ticket + upload for each file, then call
-`analyze_files(task, upload_ids=[…])`. Text documents keep the chunked pipeline each;
-PDFs/images/audio are measured for free and packed by measured tokens into as few group
-requests as fit the key's full minute budget, then everything consolidates into ONE
-result (`meta.groups` lists the packs, `meta.files` the per-file facts). A PDF that
-alone exceeds the full quota is split by page ranges and consolidated into ONE answer
-for that file before any other files are merged; its chunks are NEVER mixed with other
-files in a provider request. Other over-budget binaries refuse with their measured
-cost. One `upload_id` behaves exactly like `analyze_file`.
-
-PDFs fitting the full minute budget are not split merely because the window is
-occupied — the router can wait for it. Oversized PDFs are cut server-side by qpdf;
-`meta.file.split` or `meta.files[].split` lists page ranges and the resolution.
-`meta.file.tokens` carries the original measured cost. Install `qpdf` on the machine
-running gemini to enable page-range cutting (`sudo apt install qpdf` on Ubuntu,
-`brew install qpdf` on macOS); `pdfinfo` (poppler) is required for the page count.
-Without either binary an oversized PDF fails with an explicit ⛔️ recovery hint; files
-that fit still work. Media is processed at `ingest.media_resolution` — default `high` (the
-owner's call, 2026-10-11: the per-image cost is small next to the minute limits, and scans
-keep their small print). The level is the price: per-level prices, the provider defaults
-and their provenance live in ONE table — `gemini_router.tariffs.MEDIA_TARIFFS` in the
-router library — and the default differs per media type, so `high` roughly doubles a PDF
-page against the default. Set `""` to inherit the provider default instead;
-`meta.file.resolution` reports what was used. `ingest.pdf_max_mb` / `pdf_max_pages` mirror
-the provider's document ceilings — a file over them is refused before any upload, with the
-number that tripped.
-
-Cost drift: when the measured cost misses the router's forecast beyond the noise floor, the
-answer carries `meta.cost.drift = {predicted, measured, pct}` and the report gains a
-`COST DRIFT` line. That line doubles as an instruction — relay it to the owner as-is; it
-means the tariff table needs re-measuring. It is not an error, and the answer is unaffected.
-A second `analyze_file` on the same `upload_id` reuses the uploaded file (the reference
-lives in the inbox sidecar) until the provider expires it or the key changes — a repeat
-question is cheap and fast. Timing measured on the production daemon: the provider reports
-an upload ACTIVE in ~2 s, and a fresh file answers in 2–5 s at `thinking=low` and ~10 s at
-the default level — the bulk of the wait is the model (default thinking spends 1000+
-thinking tokens even on one-word questions), not file handling; the provider can also
-answer 503 under demand spikes, which the router retries. Never read a slow answer as a
-hang, and never resubmit: each generate call spends quota, while `count_file_tokens` — the
-step that produces `meta.file.tokens` — spends none.
-
-Per-upload cap: `ingest.max_file_mb`. For a text document it is a memory guard sized
-against the service's `MemoryMax` — the pipeline holds the extracted text in RAM while
-chunking, at roughly 4.6 MB of RSS per uploaded megabyte, so a 350 MB ceiling is reached
-near 60 MB of Cyrillic text and sooner for Latin scripts. For a PDF, image or audio file
-the blob is streamed to the provider and never held in RAM, so the cap there is about
-transfer and disk, not memory — raising it for such a file (with the owner's word) risks
-much less than for a document.
-
-An agent can exceed the cap per call with `override_size_limit`, which the tool
-instructions tell it to use only after the user has agreed in chat, having been told
-the service may die mid-job. Every such ticket is logged to `app.log` with its size and
-filename. There is no server-side switch — the user's consent is the gate.
-
-Terminal (no client needed):
+## Key and state management
 
 ```bash
-npx -y @vernikr/gemini doctor    # keys, chain, limits, live probe, local ledger
-npx -y @vernikr/gemini quota     # per key×model budget table (live, local)
-npx -y @vernikr/gemini calls -n 20   # local audit tail
+gemini keys
+gemini keys add <key>
+gemini keys remove <index-or-fingerprint>
+gemini quota
+gemini doctor
 ```
 
-## 4. Free-tier facts & troubleshooting
+`gemini keys` displays fingerprints rather than raw values. The command writes through the
+configured key store and, where applicable, can restart the associated service. Direct
+mode's usage ledger is local to the machine. Router mode uses the fleet's shared SQLite
+ledger.
 
-- Limits: 20 RPD / 5 RPM / 250k TPM **per key×model**; quota day resets at midnight
-  **America/Los_Angeles**; the chain (`routing.optimal_chain`)
-  walks models automatically, `quota_exhausted` errors carry the reset ETA + overflow hint.
-- Direct-mode counters are per-machine (local `state.db`): accurate across restarts and
-  concurrent local clients, NOT shared with other machines — that's fleet mode's job.
-- Output length, measured against the live free tier rather than taken from the docs:
-  the provider declares 65,536 output tokens and honours `maxOutputTokens` exactly —
-  and `thinkingConfig` tokens are billed against the same budget, so a thinking model's
-  *visible* answer is the cap minus its thoughts. In practice the binding limit is the
-  model's willingness, not the tier: a single call was observed delivering ~11,300
-  candidate tokens (~43 KB of prose), and every attempt to go further ended in the model
-  stopping on its own (`finishReason: STOP`) rather than in a provider refusal — the same
-  prompt and cap gave `MAX_TOKENS` in one run and `STOP` in the next. Near-ceiling output
-  is also slow (~180 tok/s), so it never fits the inline window and always becomes a
-  ticket job. This is why there is no length cap: the removed one sat far below what a
-  call actually returns.
-- `ETARGET`/404 right after a release: npm registry propagation takes ~2–4 min — retry.
-- Empty `healthz` through a tunnel (fleet): the tunnel isn't loaded —
-  `launchctl load ~/Library/LaunchAgents/com.vernikr.gemini-tunnel.plist`
-  (`Load failed: 5` there means it's ALREADY loaded — verify with curl instead).
-- Problems: run `gemini doctor` first; for backend behavior see `docs/08-dual-mode.md`.
+## Verify and troubleshoot
+
+1. Restart the MCP client and start a new session.
+2. Ask it to list Gemini tools and call `quota_status`.
+3. Test a short, non-sensitive prompt with `gemini_generate`.
+4. For files, run the ticket/upload/analyze flow with a small sample.
+5. For local TTS, run `gemini tts sample.txt`; confirm the progress bar reaches 100% and
+   the MP3 appears at the selected output path.
+
+Use `gemini doctor`, `gemini quota`, and `gemini logs` for local diagnostics. Configuration,
+backend selection, file processing, and HTTP settings are described in
+[`docs/08-dual-mode.md`](08-dual-mode.md), [`docs/02-requirements.md`](02-requirements.md),
+and [`docs/03-architecture.md`](03-architecture.md).

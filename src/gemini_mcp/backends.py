@@ -42,11 +42,10 @@ def direct_state_path(router_cfg: RouterConfig) -> str:
 
 def make_routers(app_cfg: AppCfg,
                  router_cfg: RouterConfig) -> tuple[Router, Router | None, str]:
-    """→ (default_router, optimal_route_router | None, mode). Direct mode persists to a
-    LOCAL ledger under the config home (0.8.1, owner decision): counters survive
-    restarts and are coherent across every gateway process on this machine; they are
-    still per-machine — fleet truth needs router mode. Both instances share one state
-    file (WAL, multi-process safe) exactly like fleet mode shares the VPS one."""
+    """Return the default router, optional optimal-chain router, and active mode.
+
+    Direct mode persists to a local ledger under the config home. Both gateway router
+    instances use the same WAL-backed database so local processes share quota state."""
     mode = resolve_mode(app_cfg, router_cfg)
     chain = list(app_cfg.routing.optimal_chain or [])
     want_optimal = bool(chain) and chain != list(router_cfg.chain)

@@ -31,19 +31,18 @@ class LoggingCfg(BaseModel):
 
 
 class ServerCfg(BaseModel):
-    http_bind: str = "127.0.0.1"            # b06: loopback only; tunnels for remote
+    http_bind: str = "127.0.0.1"            # loopback default; use an authenticated tunnel remotely
     http_port: int = 8790
     mcp_path: str = "/mcp"
 
 
 class ThinkingCfg(BaseModel):
-    default: str = "medium"                 # overridable per request (FR-D, user decision)
+    default: str = "medium"                 # overridable per request
 
 
 class RoutingCfg(BaseModel):
-    """Two fallback routes: 'optimal' (default) walks models in empirical
-    availability order and auto-overflows to flash-lite/gemma; 'best_available'
-    keeps the newest-first config chain with opt-in overflow (legacy semantics)."""
+    """`optimal` walks the configured availability order and enables its overflow policy;
+    `best_available` follows the configured chain and keeps overflow opt-in."""
     default_route: str = "optimal"
     # Empirical availability order: older models are less loaded on the free tier.
     # Deprecated ids stay out — 3.5 and 3.7 are aliases now, so a call to them lands on
@@ -53,6 +52,8 @@ class RoutingCfg(BaseModel):
 
 
 class IngestCfg(BaseModel):
+    """Upload inbox, size limits, ticket lifetime, retention, and extraction settings."""
+
     @field_validator("media_resolution")
     @classmethod
     def _known_resolution(cls, v: str) -> str:
@@ -62,8 +63,6 @@ class IngestCfg(BaseModel):
                              f"provider default (got {v!r})")
         return v
 
-    """File ingest (M4.5): inbox dir, caps, ticket TTL, retention (§10).
-    M4.6: pandoc converts RTF/DOCX → GitHub-flavored Markdown server-side."""
     dir: str = "inbox"
     # 20 MB keeps a single job inside the service's memory allowance. The gateway
     # holds the extracted document in memory while it chunks, so a larger file can
@@ -76,20 +75,14 @@ class IngestCfg(BaseModel):
     scp_target: str = ""           # e.g. root@<vps>; shown in tickets when set
     use_pandoc: bool = True        # RTF/DOCX/ODT/EPUB/HTML → gfm Markdown
     pandoc_timeout_s: int = 60
-    # Non-text input (PDF, images, audio, video) goes to the provider's Files API:
-    # local extraction mangles exactly the pages that matter, and pages mix text with
-    # images anyway. Numbers below mirror the provider's document ceilings; they are
-    # confirmed by probe, and a file over them is refused before any upload.
+    # Non-text input (PDF, images, audio, video) uses the provider's Files API. PDF
+    # size and page ceilings are checked locally so oversized files fail before upload.
     files_api: bool = True
     pdf_max_mb: int = 50
     pdf_max_pages: int = 1000
-    # How hard the provider looks at the media — separately from the model's thinking
-    # level, and this is what sets the price: measured 2026-10-11, an image costs
-    # 256/529/1089 tokens and a PDF page 280/560/1120 at low/medium/high, flat per level.
-    # `high` is the owner's choice for this gateway (2026-10-11) — the per-image cost is
-    # small next to the free minute limits, and scans keep their small print. "" = inherit
-    # the provider default (images high, PDFs medium), which would price the two
-    # differently for no reason we chose.
+    # Provider image/PDF resolution controls media detail independently from model
+    # thinking level. The router's tariff table defines estimates; countTokens and usage
+    # metadata provide measured accounting. An empty value inherits provider defaults.
     media_resolution: str = "high"
 
 
@@ -121,10 +114,10 @@ def config_home() -> Path:
     same on macOS/Linux). setup writes config.yaml + .env (0600) here."""
     if env := os.environ.get("GEMINI_MCP_HOME"):
         return Path(env)
-    new, legacy = Path.home() / ".config" / "gemini", Path.home() / ".config" / "gemini-mcp"
-    # Pre-rename installs keep their keys and ledger: prefer the old dir until it is
-    # moved, so upgrading never reads as "no keys configured".
-    return legacy if legacy.is_dir() and not new.is_dir() else new
+    canonical = Path.home() / ".config" / "gemini"
+    alternate = Path.home() / ".config" / "gemini-mcp"
+    # Select the alternate home only when the canonical config directory is absent.
+    return alternate if alternate.is_dir() and not canonical.is_dir() else canonical
 
 
 def load_all(path: str | Path | None = None, **over) -> tuple[AppCfg, RouterConfig]:

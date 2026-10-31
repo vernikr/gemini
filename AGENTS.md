@@ -1,45 +1,41 @@
 # AGENTS.md — gemini
 
-Follow the owner's global AGENTS.md (English in files, Russian in chat, PM-style reports,
-Conventional Commits, SemVer, push after every successful step, docs updated with
-functional changes, and risks documented alongside affected features). Repo-specific rules:
+Follow the owner's global AGENTS.md: write repository files in English, discuss in Russian,
+use Conventional Commits and SemVer, and update documentation with behavior changes.
 
 ## Context
-- The contract is `docs/02-requirements.md` (FR-x) + `docs/03-architecture.md`; do not
-  contradict them silently — update them. Worklogs are implementation notes, not contract.
-- Router library = separate repo `gemini-router`; quota/ledger logic lives THERE,
-  pipeline/MCP/progress/logging lives HERE.
-- Never bake a private server hostname/IP, user home path, or infrastructure identifier
-  into source, tests, docs, or examples. Do not modify unrelated networking, firewall,
-  or host services without explicit owner authorization. Keep server services within
-  their configured memory budget; install Python tooling with `uv`, never global pip.
+- `docs/02-requirements.md` and `docs/03-architecture.md` define the gateway contract and
+  design. Keep them aligned with the implementation.
+- The gateway owns MCP tools, file ingest, chunking, logging, and backend selection.
+  `gemini-router` owns provider routing, quota accounting, and its shared SQLite ledger.
+- Do not hard-code a private host, user path, credential, or infrastructure detail. Avoid
+  unrelated network, firewall, or host-service changes. Install Python tooling with `uv`.
+- The npm launcher checks PyPI for a newer gateway core. `--no-update` and
+  `GEMINI_AUTO_UPDATE=0` disable the check; when the registry is unavailable it uses the
+  version paired with the launcher.
+- TTS terminal progress is based on completed synthesis chunks and MP3 encoding, not time
+  estimates. JSON output remains machine-readable.
 
 ## Commands
-- `uv sync` · `uv run pytest` · `uv run ruff check src tests`
-- `uv run gemini stdio` / `serve [--bind --port]` / `setup` / `uninstall` /
-  `quota` / `calls` / `logs [-f]` / `prune` / `doctor`
-- Deploy from a workstation with `bash scripts/run_remote.sh setup|deploy|smoke|status|logs`;
-  the server address must be supplied explicitly as `VPS_HOST`.
+- `uv sync --extra dev` · `uv run pytest` · `uv run ruff check src tests`
+- `uv run gemini stdio|serve|setup|uninstall|quota|calls|logs|prune|doctor|smoke|tts`
+- `npm test --prefix packaging/npm`
+- Fleet deployment helpers require an explicit `VPS_HOST` and approved SSH access.
 
-## Secrets
-- Never commit `.env`, keys, tokens, real request bodies, private keys or user credentials.
-  `key_id = sha256[:8]` only.
-- Runtime credentials belong in a private environment file with mode `0600`; data/ledger
+## Secrets and testing
+- Never commit `.env`, keys, tokens, real request bodies, private keys, or user credentials.
+  Show only key fingerprints (`key_id = sha256[:8]`) in diagnostics.
+- Runtime credentials belong in protected user or service configuration; data and ledger
   paths are deployment configuration, not source constants.
+- CI uses mocked provider responses and does not spend live quota. Run the secret guard
+  before release; test credential-shaped fixtures must carry the `DUMMY` marker.
 
-## Testing
-- No network in CI: respx mocks reproduce the provider's 429/5xx payload shapes.
-  Real API only via an explicitly approved smoke test (budget: ≤1 RPD per run).
-- Every FR-x from `docs/02` maps to a test; keep the mapping in test docstrings.
-
-## Docs
-- Worklog lives in the repo that owns the change (placement rule mirrored in
-  gemini-router): a cross-repo feature splits into a capability plan there and a
-  product plan here, each stating its half once.
-- No counters in evergreen docs: no version numbers, dates, test counts or "N green"
-  claims. They go stale silently and each one is a fact somebody must guard. Keep only
-  what a reader cannot get from `pyproject.toml`, `--version` or `pytest`.
-- The two release-workflow lockstep guards (pyproject version == tag, npm version == tag)
-  stay: they protect a real cross-artifact invariant, not a documentation claim.
-
-- For native GitHub sub-issues, ensure `.github/workflows/issue-parent-sync.yml` exists with `issues: [opened, edited]`, `permissions: issues: write`, and a job calling `vernikr/mother/.github/workflows/issue-parent-sync.yml@v1` (create the caller workflow if missing); then put `<!-- issue-parent: #N -->` on its own line in the child Issue body, or use `<!-- issue-parent: none -->` to detach.
+## Documentation and releases
+- Evergreen documentation describes current interfaces and behavior. Release notes belong
+  in package changelogs; avoid implementation diaries, migration provenance, stale dates,
+  duplicated version numbers, and test-count claims.
+- Python and npm artifact versions stay aligned. Release workflows verify the package/tag
+  lockstep before publishing.
+- For native GitHub sub-issues, use `.github/workflows/issue-parent-sync.yml` and add
+  `<!-- issue-parent: #N -->` to the child Issue body; use `<!-- issue-parent: none -->`
+  to detach it.

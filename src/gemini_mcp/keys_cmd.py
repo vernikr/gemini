@@ -218,9 +218,7 @@ def run(args) -> int:
                 _print_rows(rows) if rows else print("  (empty — add one: gemini "
                                                      "keys add <key>)")
                 if rejected:
-                    # The command to drop them exists; a pool that lists the dead next to
-                    # the living should say so, or the operator goes looking for one
-                    # (owner, 2026-10-11 — added the key, asked where removal was).
+                    # Show the matching removal command next to the rejected fingerprints.
                     print(f"  {len(rejected)} rejected — remove: gemini keys remove "
                           + " ".join(r["fingerprint"] for r in rejected))
                 elif rows and "probe" not in rows[0]:

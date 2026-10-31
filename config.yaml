@@ -1,4 +1,4 @@
-# gemini default config (docs/03-architecture.md §8).
+# Example gateway configuration; adjust backend and limits for this deployment.
 # Secrets live in .env only: GEMINI_API_KEYS, GEMINI_MCP_TOKEN, GEMINI_ROUTER_STATE.
 
 backend: router            # fleet pin (docs/08): this config deploys to the VPS —
@@ -39,18 +39,18 @@ routing:
   optimal_chain: [gemini-3.6-flash, gemini-3-flash-preview, gemini-3.8-flash]
 
 server:
-  http_bind: 127.0.0.1     # b06: loopback only; remote via SSH tunnel / cloudflared
+  http_bind: 127.0.0.1     # loopback by default; use an authenticated tunnel for remote clients
   http_port: 8790
   mcp_path: /mcp
 
-ingest:                    # M4.5 file ingest (§9): tickets, inbox, retention
+ingest:                    # bounded uploads, inbox retention, and extraction
   dir: inbox
   max_file_mb: 20          # keeps one job inside MemoryMax; see docs/06
   ticket_ttl_s: 900
   keep_hours: 24
   total_cap_mb: 500
   scp_target: root@<YOUR_VPS_HOST>
-  use_pandoc: true         # M4.6: RTF/DOCX → GitHub-flavored Markdown on the server
+  use_pandoc: true         # extract supported office and text formats on the server
   pandoc_timeout_s: 60
 
 logging:

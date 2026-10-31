@@ -1,5 +1,5 @@
-"""M7.2 setup wizard: idempotent writes, 0600 secrets, masked reports, config-home
-autodiscovery (load_all + _bootstrap_env), uninstall guard, CLI wiring, live probe."""
+"""Setup wizard behavior: idempotent writes, protected secrets, masked reports,
+configuration discovery, uninstall safety, CLI wiring, and mocked key probes."""
 from __future__ import annotations
 
 import json

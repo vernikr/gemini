@@ -57,7 +57,7 @@ async def test_gemini_generate_tool():
 
 
 async def test_inline_raw_document_rejected_with_fix():
-    """Solar-Pro-4-class failure (2026-10-10): raw RTF inlined into a text tool."""
+    """Reject raw document content in text tools and point to the file-upload flow."""
     deps = make_deps()
     rtf = "Here is the file:\n{\\rtf1\\ansi\\ansicpg1251 {\\par garbage}}"
     with pytest.raises(ToolError) as ei:
@@ -356,11 +356,7 @@ async def test_how_a_request_ran_is_persisted_not_just_returned():
 
 # ------------------------------------------------------- the join key between two logs
 async def test_a_call_with_no_request_id_still_gets_one():
-    """The owner's layering rule joins a consumer's thin boundary record to this
-    service's log by request_id. Measured live on 2026-10-17, a call that supplied no id
-    left BOTH sides with request_id = None, so the two logs could not be joined at all.
-    The id is therefore generated here rather than left to the caller's diligence.
-    """
+    """Generate a request id when absent and reuse it in the router and audit records."""
     router = FakeRouter()
     deps = make_deps(router=router)
 

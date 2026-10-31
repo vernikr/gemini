@@ -1,6 +1,5 @@
-"""M4.5 file ingest: HMAC tickets (expiry/tamper/one-use), atomic inbox store,
-binary fail-fast with ZERO spend, server-side RTF extraction, analyze_file E2E,
-bearer-exempt upload route, three prune triggers. No network (b01)."""
+"""File ingest: signed upload tickets, atomic storage, input validation, extraction,
+analyze_file behavior, upload authorization, and retention pruning."""
 from __future__ import annotations
 
 import json

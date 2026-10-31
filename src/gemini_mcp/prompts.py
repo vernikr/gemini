@@ -1,5 +1,4 @@
-"""Prompt templates (FR-D3, FR-D6). Editable constants; a prompts/ dir override can be
-added later without touching logic (D8)."""
+"""Prompt templates used by chunked analysis (FR-D3, FR-D6)."""
 from __future__ import annotations
 
 BREVITY_RULE = (

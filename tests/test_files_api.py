@@ -255,10 +255,7 @@ async def test_missing_pdfinfo_never_blocks_a_pdf(tmp_path, monkeypatch):
 
 # ------------------------------------------------------------------ the report line
 def test_routing_noise_is_not_a_rough_edge():
-    """The `routing` event's message embeds its detail dict, and that dict has a key named
-    `wait` — so a plain text scan flagged EVERY live request as rough and made the signal
-    worthless. Stages are the structured truth; the probe that found this ran against the
-    production daemon (worklog report, 2026-10-11)."""
+    """Routing detail may contain a `wait` key; only structured wait stages are rough edges."""
     from gemini_mcp.tools import _report
 
     clean = {"backend": "router", "route": "optimal", "model": "gemini-3.6-flash",
@@ -282,10 +279,7 @@ def test_routing_noise_is_not_a_rough_edge():
 
 # ------------------------------------------------------- media resolution (the price knob)
 async def test_the_chosen_level_reaches_both_the_count_and_the_request(tmp_path, monkeypatch):
-    """The level is what the provider charges for, so a level applied to the request but not
-    to the measurement (or vice versa) makes the TPM gate and the ledger disagree. The owner
-    chose `high` for this gateway (2026-10-11) — PDFs included, doubling their per-page cost
-    against the provider default; that call is pinned here so a silent regression is loud."""
+    """The configured resolution must be consistent in provider requests and token counts."""
     router = FakeRouter()
     deps = _deps(tmp_path, monkeypatch, router=router)
     uid = await _uploaded(deps, "scan.pdf", PDF_BYTES)

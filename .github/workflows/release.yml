@@ -23,6 +23,11 @@ jobs:
       - run: python3 scripts/check_secrets.py
       - run: .venv-ci/bin/ruff check .
       - run: .venv-ci/bin/pytest -q
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm test
+        working-directory: packaging/npm
   pypi:
     needs: test
     runs-on: ubuntu-latest
@@ -97,6 +102,7 @@ jobs:
 
   deploy:
     needs: pypi                             # deploy only what is already on PyPI
+    if: startsWith(github.ref, 'refs/tags/v')
     uses: vernikr/browser-agent/.github/workflows/deploy-ssh.yml@main
     with:
       app: gemini                       # → /etc/deploy-tools.d/gemini.conf on the VPS

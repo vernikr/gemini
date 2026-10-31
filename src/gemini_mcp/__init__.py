@@ -9,7 +9,7 @@ from .tools import Deps
 
 try:                                    # single source of truth = pyproject version
     __version__ = _pkg_version("vernikr-gemini")
-except PackageNotFoundError:            # legacy dist name / unpackaged run
+except PackageNotFoundError:            # alternate installed metadata or source checkout
     try:
         __version__ = _pkg_version("gemini")
     except PackageNotFoundError:

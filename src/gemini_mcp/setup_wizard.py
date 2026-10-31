@@ -158,9 +158,8 @@ def _short_path(p: str | Path) -> str:
 
 
 def _ask_keys(console, *, purpose: str, default: str) -> str | None:
-    """Key intake as ONE visible 3-way choice. Hidden paste is guarded: toggling
-    tty echo has crashed macOS Terminal.app 2.14 (SIGSEGV, 2026-10-10) — if the
-    terminal can't do hidden input we degrade to the file option, never traceback."""
+    """Key intake as one visible three-way choice. If the terminal cannot safely
+    provide hidden input, fall back to the file option rather than raising."""
     from rich.prompt import Prompt
     if console:
         console.print(f"Get Gemini API keys for {purpose}:")

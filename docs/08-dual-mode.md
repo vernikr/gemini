@@ -1,77 +1,54 @@
-# 08 · Dual-mode backend: `router` (fleet) vs `direct` (plain AI Studio)
+# Direct and Router backends
 
-**One gateway, two backends.** Consumers without a router/VPS get the same tools, error
-vocabulary and AX as the fleet — with zero setup beyond API keys.
+The gateway exposes the same MCP tools and request semantics in both modes. The difference
+is where provider credentials and quota state are held.
 
-## Architecture (as built)
+## Backend selection
 
-The insight that made this cheap: `gemini_router.Router` already talks to
-`generativelanguage.googleapis.com` v1beta directly (key rotation, 429 day/minute
-classification, Retry-After, model chain, overflow tiers, wait policy, cache). The ONLY
-fleet-specific part is the **ledger** (shared SQLite = quota truth across clients).
+Set `backend` in the gateway configuration or use `GEMINI_MCP_BACKEND`:
 
-So `direct` mode is not a second client — it is the same `Router` engine, differing only
-in WHERE its ledger lives: `direct` persists to a LOCAL SQLite ledger under the config
-home (`~/.config/gemini/state.db`), so usage survives restarts and is coherent
-across every gateway process on the machine (Freebuff + Claude Desktop running at once).
-It is still per-machine: cross-machine truth is what fleet/router mode exists for.
-`MemLedger` (`src/gemini_mcp/backends.py`, same method contracts and row shapes as the
-sqlite `Ledger`) remains for side-effect-free live key probes (`setup`, no disk writes,
-no RPD spend). Protocol parity is by construction — there is no second code path to drift.
+- `direct`: local API-key pool and local persistent SQLite ledger.
+- `router`: configured Gemini Router endpoint and its shared ledger.
+- `auto`: selects `router` when `GEMINI_ROUTER_CONFIG` is set or the configured router
+  state file exists; otherwise selects `direct`.
 
-```
-AppCfg.backend: auto|direct|router        env GEMINI_MCP_BACKEND overrides
-resolve_mode(): auto → 'router' iff GEMINI_ROUTER_CONFIG set or state_path exists,
-                else 'direct'  (consumer default; fleet configs pin backend: router)
-make_routers(): → (router, router_optimal, mode); direct mode points BOTH instances at
-                one local state file (direct_state_path(): explicit state_path wins,
-                else <config home>/state.db) — coherent counting across processes
-```
+The environment variable overrides the configuration value. Direct-mode state defaults to
+`~/.config/gemini/state.db`; an explicitly configured state path takes precedence.
 
-## Semantics per mode
+## Mode comparison
 
-| Aspect | router (fleet) | direct (consumer) |
+| Area | Direct | Router |
 |---|---|---|
-| Quota truth | shared SQLite ledger, all clients/machines | local SQLite ledger — accurate on this machine, not shared across machines |
-| Disk state | VPS `state.db` (calls, cache, cooldowns) | `~/.config/gemini/state.db` (+ logs under the same home); removed by `uninstall` |
-| Cache / idempotency | survives restarts (24h TTL) | same — survives restarts (local file) |
-| `gemini calls` | persistent audit tail | persistent LOCAL audit tail (live rows) |
-| `gemini quota` | live shared table | live local table + ledger path note |
-| `prune` / `doctor` | full (SQLite) | full (local SQLite); doctor prints local state stats + listModels probe |
-| Multi-client fairness | enforced across machines | enforced across processes on ONE machine |
-| `gemini tts` CLI | VPS key pool via an ephemeral loopback-only SSH tunnel | local key pool |
+| Provider keys | Local Gemini key pool | Key pool managed by the router service |
+| Quota ledger | Persistent on this machine | Shared by clients of the fleet |
+| Cross-machine accounting | No | Yes |
+| MCP tools and request behavior | Same gateway interface | Same gateway interface |
+| Local `gemini tts` | Uses local keys and ledger | Uses a temporary SSH tunnel to the router proxy |
 
-The TTS command is a local CLI (not an MCP tool). In router mode it retrieves the proxy
-bearer token over SSH for the duration of the command, starts a tunnel bound to
-`127.0.0.1`, sends synthesis requests through the VPS proxy, and closes the tunnel on
-success or failure. `fleet.json` stores only the host and SSH user with mode `0600`; the
-token is memory-only. In direct mode it uses the local key pool and ledger. See
-[the consumer guide](06-consumer.md#local-text-to-speech-cli) for flags and setup.
+The router backend is appropriate when multiple clients or machines need one quota view.
+Direct mode needs no server and keeps its state local.
 
-## AX parity (non-negotiables, all shipped)
+## Text-to-speech
 
-- Identical tool set, error family (`quota_exhausted`, `plan_budget_insufficient`),
-  `RouterEvent` progress stages, meta shape.
-- `meta.backend` + `report` line now starts with `backend=direct|router` — the agent
-  always knows which mode answered (report travels in the payload because clients
-  truncate tool descriptions, p01).
-- `quota_status` adds `counters:` label — "shared ledger (fleet truth)" vs
-  "local persistent ledger — accurate on this machine, not shared across machines"
-  (honesty over symmetry).
-- `/healthz` and CLI startup logs carry `backend=`.
+`gemini tts` runs on the caller's machine in either mode. Router mode reads the proxy token
+over SSH into memory, binds a short-lived tunnel to loopback, and closes it on completion
+or failure. The local profile stores only the configured SSH host and user. Direct mode
+uses the local key pool. The CLI progress bar advances as chunks complete and as MP3
+encoding completes; it does not estimate progress from elapsed time.
 
-## Keys & config
+## Keys and state
 
-Direct mode reads keys through the existing `RouterConfig.load()` plumbing:
-`GEMINI_API_KEYS` / `GEMINI_API_KEY_1..10` env (wizard writes them to
-`~/.config/gemini/.env`). Also: `--keys` / `--keys-file` global CLI
-flags, `GEMINI_MCP_KEYS_FILE` env, and `router.keys_file` in config.yaml (precedence
-in that order, file format: comma/whitespace/newline + `#` comments) — see
-docs/06-consumer.md. No other new key surface — deliberate.
+Direct mode accepts keys through the supported environment variables, a protected key file,
+or the gateway's private configuration directory. Key display uses fingerprints rather
+than raw values. The router service reads its keys from its protected runtime environment.
 
-## Tests
+Both modes use the `gemini-router` request engine. Direct-mode key probes use an in-memory
+SQLite ledger; normal calls persist to the selected state database. The CLI exposes `quota`,
+`calls`, `doctor`, and related commands for the active backend.
 
-`tests/test_direct_backend.py`: mode resolution (auto/env/state-file), local-ledger
-persistence (spend survives a simulated restart, both routers share one state file), and
-respx E2E against a mocked AI Studio (happy path + RPD decrement, 429-per-day → model
-switch, countTokens, `backend=direct` in report/meta).
+## Local update behavior
+
+The npm launcher for `@vernikr/gemini` checks PyPI for a newer gateway core on normal CLI
+starts. Use `--no-update` for one invocation or `GEMINI_AUTO_UPDATE=0` to disable it in a
+client environment. Direct Python installations remain controlled by the version selected
+through `uv`.

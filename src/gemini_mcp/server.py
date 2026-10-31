@@ -159,7 +159,7 @@ def build_server(deps: Deps) -> MCPServer:
             wait_seconds: max seconds to hold this call inline (default 25). Longer
                 jobs return {status:'running', request_id} and keep computing
                 server-side — fetch the outcome with analyze_result(request_id).
-                None = block until finished (legacy behavior, risks client timeouts).
+                None = block until finished (may exceed client timeouts).
 
         Returns: {report, result, meta{models_used, chunks{count,failed},
         requests_spent, cache_hits, quota_after, elapsed_s, result_chars,
@@ -272,8 +272,8 @@ def build_server(deps: Deps) -> MCPServer:
         wait_seconds: int | None = 25,
         ctx: Context | None = None,
     ) -> dict:
-        """Analyze an uploaded file server-side (step 2 of 2; D11: zero client-side
-        processing). ALWAYS relay the response's 'report' field to the user in chat.
+        """Analyze an uploaded file server-side. ALWAYS relay the response's 'report' field
+        to the user in chat.
 
         The server loads inbox/<upload_id> and routes by what the bytes are:
         - text documents (.txt .md .csv, RTF, and pandoc's set: docx/odt/epub/html) are
@@ -414,8 +414,7 @@ def build_server(deps: Deps) -> MCPServer:
 
     @srv.custom_route("/v1/upload/{upload_id}", methods=["PUT", "POST"])
     async def upload(request: Request) -> JSONResponse:
-        """Presigned one-time upload (M4.5 §10): the HMAC signature in the query IS
-        the auth (bearer-exempt); size-bound, TTL-bound, spent on first use."""
+        """Accept a single-use, size-bound upload authorized by its HMAC signature."""
         from . import ingest
 
         cfgi = deps.app_cfg.ingest
@@ -498,15 +497,10 @@ class BearerMiddleware:
 
 
 class AuthMetadataRoutes:
-    """OAuth-discovery endpoints (RFC 9728/8414) telling MCP clients that this is
-    STATIC bearer auth with no authorization server.
+    """Serve OAuth discovery metadata for static bearer authentication.
 
-    Live finding (2026-10-08, Freebuff): after an unauthenticated probe gets 401, the
-    client walks the discovery ladder — /.well-known/oauth-protected-resource, then
-    oauth-authorization-server, then OIDC /.well-known/openid-configuration; Starlette's
-    default 404 (text/plain 'Not Found') crashed the client's JSON parser ('Unexpected
-    identifier Not'). We serve RFC 9728 metadata on protected-resource paths and JSON
-    (never text) on EVERY other /.well-known/* path."""
+    Protected-resource endpoints return RFC 9728 metadata; other discovery paths return
+    JSON responses so MCP clients can parse them consistently."""
 
     def __init__(self, app, mcp_path: str = "/mcp"):
         self.app = app

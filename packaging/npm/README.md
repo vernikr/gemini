@@ -1,162 +1,64 @@
 # @vernikr/gemini
 
-Gemini **free-tier** MCP gateway that needs **no server**: your MCP client (Freebuff,
-Claude Desktop, Cursor, …) talks to Google AI Studio through a quota-aware router —
-cascading Flash chain, per key×model RPD/RPM/TPM budgeting, minute-limit waiting,
-massive-body chunked analysis with consolidation. Python core `vernikr-gemini`
-(PyPI), bootstrapped via [uv](https://docs.astral.sh/uv/) — no system Python needed.
+The npm package provides the `gemini` command and launches the Python gateway from PyPI
+through `uv`. It installs `uv` with the official installer if needed; no system Python
+installation is required.
 
-## Get API keys (free)
-
-<https://aistudio.google.com/app/apikey> — several keys = several times the quota
-(20 requests/day per key×model).
-
-## Quick start
-
-### If you're human
+## Install and run
 
 ```bash
 pnpm dlx @vernikr/gemini setup
+# or
+npx -y @vernikr/gemini setup
 ```
 
-Answer the questions (pick **1 Simple** unless you run a server; keys: hidden paste,
-a file, or skip). The wizard finishes with a short numbered checklist — paste one
-JSON block into your MCP client (or let it write that for you: add
-`--write-client freebuff|claude|cursor`), restart the client, send your agent the
-printed verify prompt. Fleet (pick **2**): it also deploys your VPS end-to-end
-(clone → provision → keys → healthcheck) and prints the final block with your real
-host already inside.
+Choose Direct mode for local keys and a local quota ledger, or Router mode to connect to a
+fleet. The wizard can write an MCP client configuration and prints a verification step.
 
-### If you're an AI agent
-
-One shot, no TTY, machine-readable. Exit code `0` + `"ok": true` = done; otherwise
-every failure carries `error`/`deploy_error`/`clients_failed[].fix` naming the exact
-remedy — apply it and re-run the same command (idempotent).
+For AI-agent and non-interactive setup:
 
 ```bash
-# direct (no server); keys from a file — never from shell history
 npx -y @vernikr/gemini setup --backend direct \
-  --keys-file /abs/path/keys.txt --write-client freebuff --json
-
-# fleet (shared-quota server); clones/provisions/health-checks by itself
-npx -y @vernikr/gemini setup --backend router --vps-host <ip> \
-  [--vps-user root] [--projects-dir ~/projects] [--keys-file /abs/path/keys.txt] \
-  --write-client freebuff --json
+  --keys-file /absolute/path/keys.txt --write-client freebuff --json
 ```
 
-Fleet prerequisites you must verify first (each failure message tells you how):
-`git` and `ssh <user>@<host> 'echo ok'` work (key auth), bash+rsync are present,
-macOS/Linux. What is left for the human — relay exactly these two manual actions
-from the JSON: **restart the MCP client fully**, then **send the agent the prompt in
-`verify_prompt`** (tool `quota_status`, MCP server `gemini`).
+## Automatic updates
 
-Analyzing a FILE (agent): never read it yourself and never inline its contents into a
-prompt. Call `file_upload_ticket(filename, size_bytes)` → HTTP PUT the raw bytes to
-`upload_url` → `analyze_file(upload_id, task)`. Extraction (pandoc), chunking and quota
-are server-side; `quota_status` repeats this recipe in its `file_flow` field, and raw
-RTF/PDF/DOCX payloads in text tools fail fast with a `raw_document_inlined` fix.
+On normal CLI starts, the launcher checks PyPI for a newer `vernikr-gemini` core and uses
+it when available. The request has a short timeout; if the registry is unavailable or the
+new release cannot be installed, the launcher uses the core version paired with this npm
+package. `--help` and `--version` do not query PyPI.
+
+Disable the update check for one command with `--no-update`, or set an environment variable
+in the MCP client or shell:
+
+```bash
+GEMINI_AUTO_UPDATE=0 npx -y @vernikr/gemini setup
+```
+
+A globally installed npm launcher updates the Python core, not the launcher package itself.
+To refresh the launcher, install or invoke the latest npm package (`npx @vernikr/gemini@latest`).
 
 ## Local text-to-speech
 
 ```bash
-gemini tts notes.md
+gemini tts notes.md --voice Kore --style "Clear, calm narration"
 ```
 
-Accepts UTF-8 `.txt` and `.md` files; writes one mono MP3 beside the source at 128 kbps
-default. Optional flags include `--voice`, `--style`, `--output`, `--bitrate` and
-`--no-wait`. Direct mode uses this machine's API-key pool. Router mode uses the VPS key
-pool through an ephemeral SSH tunnel bound only to `127.0.0.1`; setup stores the VPS host
-and SSH user locally, not the proxy token. Local `ffmpeg` is required for MP3 encoding.
+The command accepts UTF-8 `.txt` and `.md`, and writes a mono MP3. `ffmpeg` must be
+available for encoding. An interactive terminal shows a progress bar that advances on
+completed audio chunks and MP3 encoding; `--json` keeps output machine-readable.
 
-## Wiring — 2 options
+## Development
 
-### A · Wizard (recommended): `setup`, then paste one JSON block
+The npm package contains a small launcher only. Gateway behavior lives in the Python
+`vernikr-gemini` distribution. Its package version is the launcher's offline fallback; the
+release workflow verifies matching Python/npm versions and publishes both artifacts.
 
 ```bash
-pnpm dlx @vernikr/gemini setup
+npm test
 ```
 
-What it does — and what it does NOT:
-
-- asks one question (simple/direct vs fleet/router; pick **1** unless you run a server);
-- takes keys via a **masked** paste, a file path, or skips — stored in
-  `~/.config/gemini/.env` (mode `0600` — the only place keys live), plus a minimal
-  `config.yaml`;
-- fleet (pick **2**): asks for your VPS host and projects folder, then does the server
-  side itself — clone/update repos, provision, push keys, healthcheck — and ends with
-  the same paste-once JSON (`--vps-host`, `--vps-user`, `--projects-dir` skip prompts);
-- probes keys live (listModels — zero quota spent) and prints fingerprints, never keys;
-- **prints** the ready `mcpServers` JSON for your client — paste it once, or pass
-  `--write-client freebuff|claude_desktop|cursor` and the wizard merges the `gemini`
-  entry into the client's config file itself (`.bak` backup kept).
-
-After the wizard the client JSON needs no env/keys — the gateway auto-discovers
-`~/.config/gemini/`:
-
-```json
-{
-  "mcpServers": {
-    "gemini": { "command": "npx", "args": ["-y", "@vernikr/gemini", "stdio"] }
-  }
-}
-```
-
-### B · JSON-only (skip the wizard entirely)
-
-Is pasting JSON into `mcp.json` enough? **Yes — if the keys travel with it** (without
-keys anywhere the gateway fails fast by design). Inline in `env`:
-
-```json
-{
-  "mcpServers": {
-    "gemini": {
-      "command": "npx",
-      "args": ["-y", "@vernikr/gemini", "stdio"],
-      "env": { "GEMINI_API_KEYS": "AIza…key1,AIza…key2" }
-    }
-  }
-}
-```
-
-…or — more private, secrets stay out of the client config — point at a keys **file**
-(comma/whitespace/newline separated, `#` comments ok):
-
-```json
-{ "env": { "GEMINI_MCP_KEYS_FILE": "/absolute/path/keys.txt" } }
-```
-
-Key sources, priority high → low: `--keys` / `--keys-file` CLI flags (any command,
-before the subcommand) → `GEMINI_MCP_KEYS_FILE` → `router.keys_file` in config.yaml →
-`GEMINI_API_KEYS` env (this is what the wizard's `.env` provides).
-
-Backend auto-resolves to `direct`; logs and the local usage ledger (`state.db` —
-quota counters survive restarts) go to `~/.config/gemini/`. Trade-off vs option A:
-keys sit in the client config file instead of a `0600` `.env`.
-
-Where to paste (restart the client fully afterwards): Freebuff `~/.agents/mcp.json` ·
-Claude Desktop `~/Library/Application Support/Claude/claude_desktop_config.json` ·
-Cursor `~/.cursor/mcp.json`. First launch pays a one-time uv resolve (~10–20 s).
-
-## Commands
-
-```bash
-pnpm dlx @vernikr/gemini doctor          # keys, chain, limits, live probe, ledger
-pnpm dlx @vernikr/gemini quota           # per key×model budget table (live)
-pnpm dlx @vernikr/gemini calls -n 20     # local audit tail
-pnpm dlx @vernikr/gemini uninstall --yes # remove keys, config and ledger
-```
-
-All commands accept `--json` (agent-facing output). MCP tools: `analyze_large`,
-`gemini_generate`, `analyze_file` (server-side RTF/DOCX extraction), `analyze_result`,
-`quota_status`, `router_logs`. Every compute answer starts with a one-line `report`
-(`backend=direct · route=… · model=… · req=N · …s · clean run`).
-
-## How the shim works
-
-`bin/gemini.js` is a ~30-line bootstrap: it runs the version-pinned Python core
-(`uvx --from vernikr-gemini==<same version> gemini …`), self-installing uv
-through the official astral.sh installer when needed (uv is not distributed via npm).
-Zero logic in JS; npm ↔ PyPI versions are
-lockstep. Fleet mode (shared quota ledger on your own server) and full docs:
-[github.com/vernikr/gemini](https://github.com/vernikr/gemini) —
-`docs/06-consumer.md`, `docs/08-dual-mode.md`.
+See the [consumer guide](../../docs/06-consumer.md),
+[architecture](../../docs/03-architecture.md), and
+[release workflow](../../docs/09-ci.md).

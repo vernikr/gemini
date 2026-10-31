@@ -10,7 +10,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 | BR1 | The Freebuff agent offloads massive-body analysis to the gateway and receives only a compact consolidated result — its own context stays clean | No intermediate chunk texts in the tool return; `meta.result_chars` reports the length. No hard cap: the answer is bounded by the model's own output ceiling, and cutting it would discard work already spent. Brevity is asked for in the prompt, not enforced here |
 | BR2 | Quota is never spent blind: every request is pre-checked against remaining RPD/RPM/TPM, and every spend is persisted | Zero unexplained 429s in the audit log; ledger survives restarts |
 | BR3 | "Which model can I send to right now?" is answerable in one command / one MCP call, by any consumer | `quota_status` tool + `gemini-router quota` CLI show per key×model: RPD left, RPM/TPM window state, cooldowns, reset ETA, recommended target |
-| BR4 | The router is reusable outside this stack (Python dep, REST, MCP) | `uv add git+…/gemini-router.git@vX` works in a foreign project; REST `/v1/*` documented |
+| BR4 | The router is reusable outside this stack (Python dep, REST, MCP) | `uv add gemini-router` works in an external Python project; REST `/v1/*` is documented |
 | BR5 | Multiple configured clients share quota accounting without exceeding provider budgets | Shared ledger records all requests; aggregate daily spend stays within configured limits |
 | BR6 | Gateway deployment avoids unrelated host/network changes | Service binds to loopback by default; deployment does not alter host firewall or unrelated services |
 
@@ -57,7 +57,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   (daemon, bearer-token auth, `127.0.0.1` bind by default).
 
 - **FR-B10** `analyze_file` MUST accept PDFs, images, audio and video by sending the bytes
-  to the provider's Files API (option A, owner decision 2026-10-11): one initial
+  to the provider's Files API: one initial
   upload, one measured token count and one generation request when it fits. PDF
   model/key tiers follow the same policy as text: if routing selects another key,
   re-upload the local blob there first, never use a foreign-key file URI. Other
@@ -104,7 +104,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   agent-facing instructions, with a plain-language remedy. Clean success stays clean.
 
 - FR-B16: `gemini tts <file.txt|file.md>` MUST synthesize one local mono MP3 with
-  `gemini-3.8-flash-tts` through `gemini-router` 0.13+. Voice and style are optional;
+  `gemini-3.8-flash-tts` through `gemini-router` 0.14+. Voice and style are optional;
   multi-speaker and streaming are out of scope. Chunk at paragraph boundaries, then
   sentence boundaries. Preflight the whole file against the 3 RPM / 10K input TPM /
   10 RPD limits before synthesis; do not leave a partial output when the complete file
@@ -135,18 +135,18 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   model instead of retrying (using the shared retry/status taxonomy in `gemini-router`).
 - **FR-C6** MUST support a key pool (`GEMINI_API_KEYS` / `GEMINI_API_KEY_1..10`);
   selection prefers the key×model pair with the largest remaining budget. The pool is
-  generation-agnostic (owner, 2026-10-11): classic `AIza…` (Standard, Cloud Console) and
-  newer `AQ.…` (Auth, AI Studio) keys both validate, probe and serve. The transport
+  generation-agnostic: classic `AIza…` and newer
+  `AQ.…` keys both validate, probe and serve. The transport
   (standard header / query / bearer) is discovered per key from the provider's answer and
-  remembered — never assumed from the shape, which Google has changed under us more than
-  once (gemini-router SPEC §10). A key the provider blocked as *leaked* is reported as
+  remembered from the provider response rather than assumed from the key format
+  (gemini-router SPEC §10). A key the provider blocked as *leaked* is reported as
   itself with the remedy, and leaves the pool like any other dead key.
 - **FR-C7** MUST count `countTokens` pre-flight toward TPM planning but NOT toward RPD.
 - **FR-C8** Overflow (opt-in per request): tier 1 `gemini-3.5-flash-lite`, tier 2 best
   available `gemma-*` (runtime-resolved, config-overridable). Overflow usage is tagged
   in the ledger and reported in `meta`.
 - **FR-C9** MUST be importable with zero MCP/Freebuff dependencies; async API
-  (`await router.complete(req, on_event=…)`) + sync facade for legacy callers
+  (`await router.complete(req, on_event=…)`) plus a sync facade for Python callers
   (synchronous integration for other Python callers).
 - **FR-C10** Ledger MUST be multi-process safe (SQLite WAL, `busy_timeout`) so the
   daemon, stdio sessions and cron jobs share one truth.
@@ -216,7 +216,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   server state without stopping the daemon.
 - **FR-E8** Secrets: API keys and bearer token MUST never appear in any log/audit/error
   (masked `key_id`, token redacted); bodies are not logged by default.
-- **FR-E9** File inbox (M4.5): upload tickets are HMAC-signed, size-bound, TTL-bound and
+- **FR-E9** File inbox: upload tickets are HMAC-signed, size-bound, TTL-bound and
   spent on FIRST use — the claim is an `O_EXCL` marker that outlives the blob, so a
   replay inside the TTL is refused even after the file is pruned or evicted. Blobs,
   sidecars and spent markers age out at `ingest.keep_hours`, capped by
@@ -250,11 +250,11 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 - **FR-F6** Config: one `config.yaml` + `.env` (secrets) per service; all limits,
   chain order, thinking default, chunking, retention, overflow tiers configurable
   without code edits; config validated at startup with clear errors (pydantic).
-- **FR-F7** Conventional Commits + SemVer; CI (GitHub Actions, free tier): lint + tests
-  on push; router tagged releases consumed by gemini via git dependency.
+- **FR-F7** Conventional Commits + SemVer; CI runs lint and tests. The gateway and router
+  declare compatible package versions and release through their package registries.
 - **FR-F8** Timezone: quota day = America/Los_Angeles; all logs store UTC + PT where relevant.
 
-## G. Acceptance scenarios (v1.0 gate)
+## G. Acceptance scenarios
 
 1. **Fits**: 50k-token body → single-shot on `gemini-3.8-flash`, thinking high, result +
    meta; ledger row; `quota_status` shows 19 RPD left.

@@ -1,30 +1,39 @@
-# OmniRush / Claude Code plugin
+# OmniRush plugin
 
-## Prerequisites
+The repository root contains the Claude Code-compatible plugin manifest and MCP server
+configuration. The manifest starts the `gemini` gateway over stdio using the installed
+checkout; MCP protocol messages use stdout, and diagnostics use stderr.
 
-Install uv (including uvx) and Python 3.12+. The plugin builds the Python package from this checkout, not a nonexistent npm/PyPI distribution. The pinned gemini-router dependency is loaded from its private GitHub tag because the required version is not yet on PyPI. Git and read access to vernikr/gemini-router are required in the app environment (configure the system Git credential helper first; do not embed credentials in the manifest). Configure Gemini first with `uvx --from /absolute/path/to/plugin gemini setup` (or provide the supported environment/configuration). API keys belong in the runtime environment or Gemini user config, never in this repository.
+## Requirements
 
-## Install from GitHub
+- OmniRush with support for `${CLAUDE_PLUGIN_ROOT}` in MCP commands.
+- Python 3.12+ and `uvx` available to the OmniRush process.
+- Gemini provider credentials configured in the user's runtime environment or
+  `~/.config/gemini/`; never store keys in the repository or plugin manifest.
 
-1. Open OmniRush **Settings → Library → Advanced settings → From GitHub**.
-2. Paste `https://github.com/vernikr/gemini`.
-3. Select **Preview** and verify the plugin name `gemini` and MCP server `gemini`.
-4. Select **Install**, enable the server if prompted, then start a new session.
+## Install
 
-For a private repository, GitHub authentication must already be configured on the computer running OmniRush. Never paste a PAT into a manifest or commit it.
+1. In OmniRush, open **Settings → Library → Advanced settings → From GitHub**.
+2. Enter `https://github.com/vernikr/gemini`.
+3. Preview the entry and confirm the plugin and MCP server are named `gemini`.
+4. Install and enable the server, then start a new session.
 
-The root `.claude-plugin/plugin.json` is the plugin entry point; `mcpServers` references the root `.mcp.json`. Gemini uses the standard `${CLAUDE_PLUGIN_ROOT}` substitution to run the installed checkout, not a path on the maintainer's computer. OmniRush must support this Claude Code placeholder. These are stdio servers; stdout is reserved for MCP.
+The root `.claude-plugin/plugin.json` references `.mcp.json`. The MCP command uses the
+installed plugin path, not a maintainer's workstation path. The source repository is
+public; do not add authentication tokens to the manifest.
 
 ## macOS launch environment
 
-OmniRush launched from the Dock may not inherit shell PATH or environment settings. Ensure the prerequisite command (`uvx`) is discoverable in the app environment; if needed, launch OmniRush from a configured terminal or adjust its MCP environment settings. No personal absolute paths or secrets are embedded in the plugin.
+Desktop apps may inherit a different `PATH` from an interactive shell. If OmniRush cannot
+find `uvx`, make it available to the app or launch OmniRush from a configured terminal.
+Avoid embedding user-specific absolute paths in the manifest.
 
-## Verify and troubleshoot
+## Verify
 
-Run `python3 scripts/check-plugin.py` to validate packaging. A successful preview is not a live MCP check: after installation, ask the client to list tools and call an appropriate health/status tool. Gemini needs configured provider credentials for real analysis; Browser Agent needs its external daemon for browser operations. Biblio mirror availability is independent of installation.
+Run `python3 scripts/check-plugin.py` to validate the package files. After installation,
+start a new session and ask the client to list Gemini tools and call `quota_status`. A live
+provider request also requires configured Gemini credentials. The repository's automated
+tests validate the manifest and server code; they do not exercise the OmniRush desktop UI.
 
-If Preview rejects the manifest or fails to resolve the placeholder, record the OmniRush version and error; do not replace it with a guessed local absolute path. The desktop UI cannot be exercised by this repository's offline tests.
-
-## Versioning
-
-Plugin packaging has its own SemVer in `.claude-plugin/plugin.json`. Tags use `plugin-v*`, so packaging releases do not trigger server-package publishing or infrastructure deployment workflows. Existing server release/version contracts remain unchanged.
+Plugin metadata has its own version in `.claude-plugin/plugin.json`. `plugin-v*` tags are
+reserved for plugin packaging and do not trigger the Python/npm package release workflow.

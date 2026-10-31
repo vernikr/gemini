@@ -1,6 +1,4 @@
-"""Route profiles (v0.4.0): 'optimal' (default) selects the availability-ordered
-router and auto-upgrades overflow to lite+gemma; 'best_available' keeps the legacy
-newest-first chain with opt-in overflow. No network (b01)."""
+"""Route profiles select an availability-ordered or configured model chain without network."""
 from __future__ import annotations
 
 from conftest import FakeCtx, FakeRouter, make_deps
@@ -27,7 +25,7 @@ async def test_optimal_route_is_default():
     assert "clean run" in out["report"]
 
 
-async def test_best_available_route_keeps_legacy():
+async def test_best_available_route_uses_configured_chain():
     deps = _deps_two()
     out = await gemini_generate_tool(deps, ProgressEmitter(FakeCtx()),
                                      {"prompt": "hi", "route": "best_available"})

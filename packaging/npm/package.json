@@ -1,6 +1,6 @@
 {
   "name": "@vernikr/gemini",
-  "version": "0.27.0",
+  "version": "0.28.0",
   "description": "One-command Gemini free-tier MCP gateway: quota-aware model routing, massive-body chunked analysis, file ingest \u2014 text extracted server-side, PDFs/images/audio read by the provider Files API \u2014 async tickets. Thin bootstrap for the Python core vernikr-gemini.",
   "bin": {
     "gemini": "bin/gemini.js"
@@ -8,6 +8,9 @@
   "files": [
     "bin"
   ],
+  "scripts": {
+    "test": "node --test test/*.test.js"
+  },
   "license": "MIT",
   "engines": {
     "node": ">=18"

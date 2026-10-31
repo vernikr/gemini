@@ -139,9 +139,8 @@ def _report(meta: dict) -> str:
 
 
 def _apply_route(deps: Deps, route: str | None, overflow: str | None) -> tuple[Router, str, str]:
-    """Resolve (router, overflow, route). 'optimal' (default): empirical-availability
-    chain, overflow auto-upgraded to 'lite+gemma'. 'best_available': newest-first
-    config chain, overflow strictly opt-in (legacy hard-stop)."""
+    """Resolve the route and overflow policy. `optimal` uses the configured availability
+    chain; `best_available` follows the configured chain and keeps overflow opt-in."""
     r = route or deps.app_cfg.routing.default_route
     if r == "optimal":
         router = deps.router_optimal or deps.router
@@ -168,23 +167,13 @@ async def _marked_runner(runner, emitter: ProgressEmitter, params: dict) -> dict
 
 
 def _rid(tool: str, params: dict) -> str:
-    """Every call carries an id, whether the caller supplied one or not.
-
-    The owner's layering rule joins a consumer's thin "I asked / I got" record to this
-    service's own log by request_id. Measured live on 2026-10-17, a call that did not
-    supply one left BOTH sides with request_id = None — the audit row and the router
-    ledger row — so the two logs could not be joined at all, and the chunk and
-    consolidation sub-requests of one analyze job could not be grouped either, because
-    Pipeline._rid derives theirs from this one. Generating it here fixes all of that in
-    one place; the name matches the one _jobbed already used.
-    """
+    """Return the caller's id or create one shared by the gateway audit and router
+    ledger. The pipeline derives its child chunk and consolidation ids from this value."""
     return params.get("request_id") or f"{tool}-{uuid.uuid4().hex[:12]}"
 
 
 def _src(params: dict) -> str:
-    """Who is calling. The CLI passes source="cli"; the tools used to overwrite it with
-    a hardcoded "mcp", so the executor's own log could not tell the two surfaces apart —
-    confirmed live: a CLI call landed in the ledger as source='mcp'."""
+    """Return the caller's source label; default to ``mcp`` for tool requests."""
     return params.get("source") or "mcp"
 
 
@@ -485,9 +474,8 @@ def _load_and_extract(inbox: Path, upload_id: str, cfgi) -> _Loaded:
 
 
 async def analyze_file_tool(deps: Deps, emitter: ProgressEmitter, params: dict) -> dict:
-    """Server-side file analysis (D11): load inbox blob → sniff (unsupported → fail-fast,
-    ZERO spend) → text documents run the existing chunked pipeline, media goes
-    through measured Files API requests (oversized PDFs may be split)."""
+    """Load and inspect the inbox file, then analyze text through the chunked pipeline or
+    media through measured Files API requests; oversized PDFs may be split by page range."""
     params = {**params, "request_id": _rid("analyze_file", params)}
     cfgi = deps.app_cfg.ingest
     inbox = Path(cfgi.dir)

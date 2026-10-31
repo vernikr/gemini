@@ -1,18 +1,17 @@
-"""The config dir was renamed with the project; the keys inside it were not moved."""
+"""Configuration-home selection and environment override behavior."""
 from pathlib import Path
 
 from gemini_mcp.config import config_home
 
 
-def test_config_home_prefers_a_pre_rename_dir_with_keys(tmp_path, monkeypatch):
-    """An upgrade must not read as 'no keys configured': the ledger and .env live in the
-    old directory, and nothing in this change moves them."""
+def test_config_home_uses_alternate_dir_when_canonical_is_absent(tmp_path, monkeypatch):
+    """Use the alternate config directory only when the canonical one is absent."""
     monkeypatch.delenv("GEMINI_MCP_HOME", raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
-    legacy = tmp_path / ".config" / "gemini-mcp"
-    legacy.mkdir(parents=True)
+    alternate = tmp_path / ".config" / "gemini-mcp"
+    alternate.mkdir(parents=True)
 
-    assert config_home() == legacy
+    assert config_home() == alternate
 
 
 def test_config_home_uses_the_new_dir_on_a_fresh_install(tmp_path, monkeypatch):
@@ -23,7 +22,7 @@ def test_config_home_uses_the_new_dir_on_a_fresh_install(tmp_path, monkeypatch):
 
 
 def test_config_home_new_dir_wins_once_it_exists(tmp_path, monkeypatch):
-    """After the user moves across, the legacy dir must stop shadowing the new one."""
+    """The canonical config directory takes precedence when both exist."""
     monkeypatch.delenv("GEMINI_MCP_HOME", raising=False)
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     (tmp_path / ".config" / "gemini-mcp").mkdir(parents=True)
