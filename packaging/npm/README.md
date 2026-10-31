@@ -45,8 +45,7 @@ npx -y @vernikr/gemini setup --backend router --vps-host <ip> \
 ```
 
 Fleet prerequisites you must verify first (each failure message tells you how):
-`git ls-remote https://github.com/vernikr/gemini` succeeds (private repos —
-GitHub auth), `ssh <user>@<ip> 'echo ok'` succeeds (key auth), bash+rsync present,
+`git` and `ssh <user>@<host> 'echo ok'` work (key auth), bash+rsync are present,
 macOS/Linux. What is left for the human — relay exactly these two manual actions
 from the JSON: **restart the MCP client fully**, then **send the agent the prompt in
 `verify_prompt`** (tool `quota_status`, MCP server `gemini`).
@@ -56,6 +55,18 @@ prompt. Call `file_upload_ticket(filename, size_bytes)` → HTTP PUT the raw byt
 `upload_url` → `analyze_file(upload_id, task)`. Extraction (pandoc), chunking and quota
 are server-side; `quota_status` repeats this recipe in its `file_flow` field, and raw
 RTF/PDF/DOCX payloads in text tools fail fast with a `raw_document_inlined` fix.
+
+## Local text-to-speech
+
+```bash
+gemini tts notes.md
+```
+
+Accepts UTF-8 `.txt` and `.md` files; writes one mono MP3 beside the source at 128 kbps
+default. Optional flags include `--voice`, `--style`, `--output`, `--bitrate` and
+`--no-wait`. Direct mode uses this machine's API-key pool. Router mode uses the VPS key
+pool through an ephemeral SSH tunnel bound only to `127.0.0.1`; setup stores the VPS host
+and SSH user locally, not the proxy token. Local `ffmpeg` is required for MP3 encoding.
 
 ## Wiring — 2 options
 

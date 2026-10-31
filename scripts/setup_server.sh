@@ -1,18 +1,15 @@
 #!/usr/bin/env bash
-# setup_server.sh — idempotent provisioning of gemini on the VPS. Run AS ROOT on the
-# server (run_remote.sh does this over ssh). Server-spec compliant:
-#   * never touches ufw/iptables, external-service, unrelated-service, sysctl, ports 22/443/20724;
-#   * adds ONLY a loopback daemon 127.0.0.1:8790 + unit with MemoryMax=350M;
-#   * uv-managed venv under /opt/apps (PEP 668: no global pip installs).
+# setup_server.sh — idempotent provisioning of gemini on an owner-managed Linux host.
+# Run with the privileges required to install the service and write its configuration.
+# The daemon binds only to loopback; Python tooling is installed with uv (no global pip).
 # Re-running is safe: dirs/venv/.env persist, deps are reinstalled, unit is restarted.
 set -euo pipefail
 
 APP=/opt/apps/gemini-mcp
-ROUTER_SRC=/opt/apps/gemini-router          # rsync'd source (no GitHub auth on server)
-SHARED=/opt/apps/shared/gemini-router       # shared quota ledger (MCP + future tldr)
-APP_USER="${APP_USER:-root}"   # VPS has no dedicated user yet (verified 2026-10-08); service runs as root with unit hardening
+ROUTER_SRC=/opt/apps/gemini-router          # rsync'd router source
+SHARED=/opt/apps/shared/gemini-router       # shared quota ledger
+APP_USER="${APP_USER:-root}"
 ENVF="$APP/.env"
-EXTERNAL_ENV=/opt/apps/external-consumer/.env
 
 command -v uv >/dev/null 2>&1 || {
   echo "uv not found. Install as root: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
@@ -20,7 +17,7 @@ command -v uv >/dev/null 2>&1 || {
 id "$APP_USER" >/dev/null 2>&1 || { echo "user '$APP_USER' missing (override: APP_USER=...)" >&2; exit 1; }
 
 # pandoc — server-side RTF/DOCX → Markdown extraction (M4.6). One-shot subprocess
-# per file (no daemon, no RAM residency); never touches ports/services (deployment notes).
+# per file (no daemon, no RAM residency); never touches ports/services (host safety requirements).
 if ! command -v pandoc >/dev/null 2>&1; then
   echo "→ installing pandoc (RTF/DOCX → Markdown)"
   apt-get update -qq >/dev/null 2>&1 || true
@@ -50,31 +47,14 @@ if [[ ! -f $ENVF ]]; then
 fi
 chmod 600 "$ENVF"
 
-# Key import (decision D2: shared pool with external-consumer). Retried on EVERY run while
-# GEMINI_API_KEYS is still empty. Source vars tried in order:
-#   GEMINI_API_KEYS → GEMINI_API_KEY → LLM_API_KEY (only when LLM_PROVIDER contains
-#   "gemini" — external-consumer uses generic provider names; canonical name here is
-#   GEMINI_API_KEYS; M6 migration will unify external-consumer onto it).
+# Upstream keys are deliberately application-specific: never import credentials from
+# another project or account. Keep the variable present for the owner to populate.
+if ! grep -q '^GEMINI_API_KEYS=' "$ENVF"; then
+  echo "GEMINI_API_KEYS=" >> "$ENVF"
+fi
 if ! grep -qE '^GEMINI_API_KEYS=..*' "$ENVF"; then
-  src=""
-  for pat in '^GEMINI_API_KEYS=..*' '^GEMINI_API_KEY=..*'; do
-    src="$(grep -hE "$pat" "$EXTERNAL_ENV" 2>/dev/null | head -1 | cut -d= -f2- || true)"
-    [[ -n $src ]] && break
-  done
-  if [[ -z $src ]] && grep -qiE '^LLM_PROVIDER=.*gemini' "$EXTERNAL_ENV" 2>/dev/null; then
-    src="$(grep -hE '^LLM_API_KEY=.+' "$EXTERNAL_ENV" 2>/dev/null | head -1 | cut -d= -f2- || true)"
-    [[ -n $src ]] && echo "note: key taken from external-consumer LLM_API_KEY (LLM_PROVIDER=gemini)"
-  fi
-  sed -i '/^GEMINI_API_KEYS=/d' "$ENVF"
-  if [[ -n $src ]]; then
-    echo "GEMINI_API_KEYS=$src" >> "$ENVF"
-    echo "imported Gemini key(s) from $EXTERNAL_ENV (shared pool)"
-  else
-    echo "GEMINI_API_KEYS=" >> "$ENVF"
-    echo "WARNING: no Gemini keys found in $EXTERNAL_ENV" >&2
-    echo "         (tried GEMINI_API_KEYS / GEMINI_API_KEY / LLM_API_KEY+LLM_PROVIDER=gemini)" >&2
-    echo "         → put them into $ENVF as GEMINI_API_KEYS=key1,key2" >&2
-  fi
+  echo "WARNING: GEMINI_API_KEYS is empty in $ENVF" >&2
+  echo "         → add the key pool for this Gemini deployment before starting the service" >&2
 fi
 
 # ---- venv + deps ----
@@ -83,8 +63,8 @@ as_app() { sudo -u "$APP_USER" env VIRTUAL_ENV="$APP/.venv" "$@"; }
 as_app uv pip install --no-cache "$ROUTER_SRC"
 as_app uv pip install --no-cache "mcp[cli]>=1.9" "uvicorn>=0.30" "starlette>=0.37" \
   "rich>=13.7" "pyyaml>=6.0" "python-dotenv>=1.0"
-# --no-deps: the app's pyproject pins gemini-router via a PRIVATE git URL; the router is
-# already installed from local source above, so we skip dependency resolution entirely.
+# --no-deps: the router is already installed from the synchronized source checkout above;
+# install the application package without replacing it from the package index.
 as_app uv pip install --no-cache --no-deps "$APP"
 
 # ---- released package via `uv tool` — the binary the systemd unit runs, the one

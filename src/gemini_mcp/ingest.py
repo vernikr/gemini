@@ -297,7 +297,7 @@ def decode_text(data: bytes) -> tuple[str, str]:
 def pandoc_to_markdown(data: bytes, fmt: str, timeout_s: int = 60) -> str | None:
     """One-shot subprocess: bytes → GitHub-flavored Markdown (headings, bold/italic,
     lists and tables survive). None when pandoc is missing or fails — callers fall
-    back to the plain-text extractor. No daemon, no RAM residency (deployment notes)."""
+    back to the plain-text extractor. No daemon, no RAM residency (host safety requirements)."""
     import shutil
     import subprocess
     import tempfile

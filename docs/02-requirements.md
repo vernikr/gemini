@@ -1,6 +1,5 @@
-# 02 · Functional & Business Requirements — Stage 2 artifact
+# Requirements
 
-Date: 2026-10-08 · Inputs: `worklog/archive/01-unpacking-reframing.md` ·
 Priority: MUST / SHOULD / MAY.
 Numeric defaults live in `config.yaml` (single source); this doc references key names, not values.
 
@@ -12,8 +11,8 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
 | BR2 | Quota is never spent blind: every request is pre-checked against remaining RPD/RPM/TPM, and every spend is persisted | Zero unexplained 429s in the audit log; ledger survives restarts |
 | BR3 | "Which model can I send to right now?" is answerable in one command / one MCP call, by any consumer | `quota_status` tool + `gemini-router quota` CLI show per key×model: RPD left, RPM/TPM window state, cooldowns, reset ETA, recommended target |
 | BR4 | The router is reusable outside this stack (Python dep, REST, MCP) | `uv add git+…/gemini-router.git@vX` works in a foreign project; REST `/v1/*` documented |
-| BR5 | `external-consumer` and the gateway coexist on the same key pool without stomping each other's quota | After M6 both write the same ledger; combined daily spend ≤ budgets |
-| BR6 | The VPS keeps running its external network services untouched | Compliance with deployment notes do-not-touch list; `MemoryMax=350M`; no ufw/port changes |
+| BR5 | Multiple configured clients share quota accounting without exceeding provider budgets | Shared ledger records all requests; aggregate daily spend stays within configured limits |
+| BR6 | Gateway deployment avoids unrelated host/network changes | Service binds to loopback by default; deployment does not alter host firewall or unrelated services |
 
 ## B. MCP interface (tools)
 
@@ -133,7 +132,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   NOT retried on the same model.
 - **FR-C5** MUST retry retryable failures (408/409/429-RPM/5xx/network) with exponential
   backoff + jitter, bounded by `provider_timeout_s`; client 4xx (except 408/429) switch
-  model instead of retrying (taxonomy inherited from external-consumer `src/llm.py`).
+  model instead of retrying (using the shared retry/status taxonomy in `gemini-router`).
 - **FR-C6** MUST support a key pool (`GEMINI_API_KEYS` / `GEMINI_API_KEY_1..10`);
   selection prefers the key×model pair with the largest remaining budget. The pool is
   generation-agnostic (owner, 2026-10-11): classic `AIza…` (Standard, Cloud Console) and
@@ -148,7 +147,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   in the ledger and reported in `meta`.
 - **FR-C9** MUST be importable with zero MCP/Freebuff dependencies; async API
   (`await router.complete(req, on_event=…)`) + sync facade for legacy callers
-  (external-consumer migration).
+  (synchronous integration for other Python callers).
 - **FR-C10** Ledger MUST be multi-process safe (SQLite WAL, `busy_timeout`) so the
   daemon, stdio sessions and cron jobs share one truth.
 - **FR-C11** SHOULD cache identical requests: key = hash(model, thinking_level,

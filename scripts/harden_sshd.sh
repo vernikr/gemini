@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # harden_sshd.sh — kill password brute-force on :22 WITHOUT firewall rules
-# (deployment notes: never block 22/443/20724 in ufw/iptables). Idempotent drop-in.
+# (host safety requirements: never block 22/443/20724 in ufw/iptables). Idempotent drop-in.
 # SAFETY: run from an OPEN ssh session; requires root key login to already work.
 set -euo pipefail
 

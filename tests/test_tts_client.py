@@ -20,11 +20,11 @@ def test_token_command_is_an_ssh_argument_after_the_target(monkeypatch):
             or SimpleNamespace(returncode=0, stdout="secret-token\n", stderr="")
         ),
     )
-    token = tts_client._read_proxy_token(FleetProfile("fleet.example", "deploy"))
+    token = tts_client._read_proxy_token(FleetProfile("test-vps", "deploy"))
     cmd, kwargs = calls[0]
     assert token == "secret-token"
-    assert cmd[0] == "ssh" and cmd.index("-o") < cmd.index("REDACTED_EMAIL")
-    assert cmd[-2] == "REDACTED_EMAIL" and cmd[-1] == tts_client._TOKEN_COMMAND
+    assert cmd[0] == "ssh" and cmd.index("-o") < cmd.index("deploy@test-vps")
+    assert cmd[-2] == "deploy@test-vps" and cmd[-1] == tts_client._TOKEN_COMMAND
     assert kwargs["timeout"] == 15 and kwargs["check"] is False
 
 
@@ -36,7 +36,7 @@ def test_proxy_token_is_not_included_in_failure_message(monkeypatch):
         lambda *a, **kw: SimpleNamespace(returncode=1, stdout=secret, stderr="permission denied"),
     )
     with pytest.raises(tts_client.FleetTunnelError) as err:
-        tts_client._read_proxy_token(FleetProfile("fleet.example"))
+        tts_client._read_proxy_token(FleetProfile("test-vps"))
     assert secret not in str(err.value)
 
 
@@ -47,7 +47,7 @@ def test_proxy_token_rejects_multiline_shell_output(monkeypatch):
         lambda *a, **kw: SimpleNamespace(returncode=0, stdout="token\nwarning", stderr=""),
     )
     with pytest.raises(tts_client.FleetTunnelError):
-        tts_client._read_proxy_token(FleetProfile("fleet.example"))
+        tts_client._read_proxy_token(FleetProfile("test-vps"))
 
 
 def test_tunnel_binds_loopback_and_closes(monkeypatch):
@@ -80,14 +80,14 @@ def test_tunnel_binds_loopback_and_closes(monkeypatch):
     )
     monkeypatch.setattr(tts_client.subprocess, "Popen", FakeProcess)
 
-    tunnel = tts_client.ServerProxyTunnel(FleetProfile("fleet.example", "deploy"))
+    tunnel = tts_client.ServerProxyTunnel(FleetProfile("test-vps", "deploy"))
     with tunnel as proxy:
         assert proxy.base_url == "http://127.0.0.1:41237/v1beta"
         assert proxy.token == "memory-only"
     cmd, kwargs = commands[0]
-    destination = cmd.index("REDACTED_EMAIL")
+    destination = cmd.index("deploy@test-vps")
     forward = cmd.index("-L")
-    assert forward < destination and cmd[-1] == "REDACTED_EMAIL"
+    assert forward < destination and cmd[-1] == "deploy@test-vps"
     assert cmd[forward + 1] == "127.0.0.1:41237:127.0.0.1:8787"
     assert "-N" in cmd and kwargs["stdin"] == subprocess.DEVNULL
     assert tunnel.process is None

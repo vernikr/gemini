@@ -1,11 +1,11 @@
-# 03 · Architecture & Stack — Stage 3 artifact
+# Architecture and stack
 
-Date: 2026-10-08 · Inputs: `01`, `02` · Rule: one codebase, two transports, one ledger.
+Rule: one codebase, two transports, one ledger.
 
 ## 1. System view
 
 ```
-Freebuff Desktop (macOS/Windows)                     VPS YOUR_VPS_HOST (Ubuntu 24.04, 1GB RAM)
+Freebuff Desktop (macOS/Windows)                     Owner-managed VPS (Linux)
 ┌──────────────────────────────┐                    ┌───────────────────────────────────────────┐
 │ ~/.agents/mcp.json           │                    │  systemd: gemini-mcp.service (MemoryMax=350M)│
 │  A) stdio: ssh root@vps ────┼──── SSH (22) ─────►│  ┌─────────────────────────────────────┐  │
@@ -17,7 +17,7 @@ Freebuff Desktop (macOS/Windows)                     VPS YOUR_VPS_HOST (Ubuntu 2
    package on the VPS, standalone:                  │   stdio session │ (ephemeral, per agent)  │
    python -m gemini_mcp stdio                       │  ┌──────────────▼──────────────────────┐  │
                                                     │  │ gemini-router (library, async)      │  │
-   external-consumer (cron, M6) ─────────────────────────►│  │  strategy · keypool · budgets · 429 │  │
+   other configured clients ──────────────────────────►│  │  strategy · keypool · budgets · 429 │  │
                                                     │  │  cache · events · CLI               │  │
    external projects ── uv add git+…gemini-router ──┤  └──────────────┬──────────────────────┘  │
                                                     │        SQLite WAL│ /opt/apps/shared/       │
@@ -67,12 +67,12 @@ result = await router.complete(
                   wait=True, source="mcp"),    # wait: minute-scale gates (FR-C13)
     on_event=lambda e: …)                      # RouterEvent(stage, pct, model, wait_s, detail)
 # RouterResult(text, model, key_id, tokens_in, tokens_out, latency_s, cached, events[], quota_after)
-sync_facade: router.complete_sync(…)           # for external-consumer migration (M6)
+sync_facade: router.complete_sync(…)           # for synchronous Python integrations
 ```
 
-Inherited from `external-consumer/src/llm.py` (extract, don't rewrite): status taxonomy
-(`RETRYABLE_STATUS`, `MODEL_SWITCH_STATUS`), `Retry-After` parsing, `extract_json`,
-`listModels` validation + `_best_available`, backoff with jitter and provider deadline.
+The router centralizes retry/status taxonomy (`RETRYABLE_STATUS`, `MODEL_SWITCH_STATUS`),
+`Retry-After` parsing, `extract_json`, `listModels` validation, backoff with jitter and
+provider deadlines.
 
 ### 2.2 `gemini` — gateway & pipeline
 
@@ -198,7 +198,7 @@ offset, RAM). Same tables exposed by MCP `quota_status`/`router_logs` and REST `
 
 ```
 /opt/apps/gemini-mcp/          # rsync'd from workstation (scripts/run_remote.sh pattern)
-├── .env                       # chmod 600: GEMINI_API_KEYS (copied from external-consumer .env by setup), GEMINI_MCP_TOKEN, GEMINI_ROUTER_STATE
+├── .env                       # chmod 600: owner-provided GEMINI_API_KEYS, GEMINI_MCP_TOKEN, GEMINI_ROUTER_STATE
 ├── .venv/                     # uv venv + uv pip install --no-cache (router from git tag)
 ├── config.yaml · src/ · scripts/ · prompts inline
 └── logs/                      # app.log*, requests-*.jsonl
@@ -207,13 +207,13 @@ offset, RAM). Same tables exposed by MCP `quota_status`/`router_logs` and REST `
                                           # MemoryMax=350M, Restart=on-failure, EnvironmentFile=.env
 ```
 
-- Stdio sessions (path A): `ssh root@YOUR_VPS_HOST '~/.local/bin/gemini stdio'`
+- Stdio sessions (path A): `ssh root@<YOUR_VPS_HOST> '~/.local/bin/gemini stdio'`
   — no unit needed; optional sshd slice drop-in caps session RAM (documented, off by default).
-- Ports: only `127.0.0.1:8790` (daemon). **No ufw changes** (loopback isn't filtered);
-  443/20724/22 untouched; external-service untouched.
-- Setup: `scripts/setup_server.sh` — idempotent: dirs, venv, deps, token gen (if absent),
-  key import from `/opt/apps/external-consumer/.env` (if `GEMINI_API_KEYS` unset), unit install,
-  `daemon-reload`, enable+start, doctor run. Never edits unrelated-service/ufw/sysctl.
+- Network: daemon listens only on `127.0.0.1:8790`; clients use SSH forwarding when needed.
+- Setup: `scripts/setup_server.sh` — idempotent: directories, venv, dependencies, token
+  generation (if absent), service installation and doctor run. Upstream API keys are
+  application-specific and are provided explicitly by the owner; no other app's secrets
+  are imported.
 
 Client wiring (both transports, quirks and verification prompts): `freebuff-wiring.md`.
 
@@ -221,7 +221,7 @@ Client wiring (both transports, quirks and verification prompts): `freebuff-wiri
 
 | Choice | Why | Rejected alternative |
 |---|---|---|
-| Python 3.12 + uv | server standard, external-consumer compat, `--no-cache` disk discipline | TS/Bun (ecosystem split on this VPS), Go (faster cold start but team/repo context is Python) |
+| Python 3.12 + uv | reproducible, isolated installs and a shared language for the gateway and router | TS/Bun or Go (would add a second runtime and duplicate routing logic) |
 | Official `mcp` SDK **v2** (`MCPServer`; FastMCP was renamed in 2.x) | one codebase → stdio + streamable HTTP; progress notifications with message; `custom_route` for REST; `call_tool` for tests | hand-rolled JSON-RPC, pinning `mcp<2` |
 | `httpx` (async, HTTP/2) | concurrency for pacing + countTokens pre-flight; fine-grained timeouts | `requests` (sync; inherited code wraps it in facade) |
 | SQLite (stdlib, WAL) | zero-dep durable multi-process ledger; 20 GB disk, tiny write rate | JSON+filelock (fragile), Redis/Postgres (RAM/ops cost on 1 GB box) |
@@ -231,8 +231,8 @@ Client wiring (both transports, quirks and verification prompts): `freebuff-wiri
 | GitHub Actions free CI | lint+test per push, tags → releases | none |
 
 Process/RAM budget: daemon ≈ 120–180 MB (FastMCP+httpx+rich), stdio shim ≈ 80–120 MB
-(ephemeral), external-consumer run ≤ 350 MB (existing) — worst-case sum < 700 MB with swap
-headroom; `MemoryMax=350M` per unit guarantees external-service is never threatened.
+(ephemeral). The service unit is capped at 350 MB; leave capacity for the host OS and
+other services on the target machine.
 
 ## 8. Configuration surface (config.yaml — defaults decided here, values live there)
 

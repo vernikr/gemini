@@ -182,9 +182,9 @@ folder (existing clones are `git pull`ed — never re-cloned over), runs
 `scripts/run_remote.sh setup` (rsync + provision + systemd unit, output streamed),
 optionally writes your Gemini keys into the server's `.env` (0600, keys travel over
 stdin — never visible in `ps`/history), waits for `/healthz`, and prints the final
-paste-NOW snippet with your real host. Requirements: macOS/Linux, git authenticated
-to GitHub (private repos — `gh auth login` or a credential helper), ssh access to the
-server. After any `git tag`, push-CD updates the server automatically (docs/09-ci.md).
+paste-NOW snippet with your configured host. Requirements: macOS/Linux, Git access to
+the source repositories, and SSH access to the server. After a release tag, the configured
+deployment job updates the server (docs/09-ci.md).
 
 The snippet it prints (host already filled in):
 
@@ -342,6 +342,4 @@ npx -y @vernikr/gemini calls -n 20   # local audit tail
 - Empty `healthz` through a tunnel (fleet): the tunnel isn't loaded —
   `launchctl load ~/Library/LaunchAgents/com.vernikr.gemini-tunnel.plist`
   (`Load failed: 5` there means it's ALREADY loaded — verify with curl instead).
-- Problems: `doctor` first; deeper: `docs/08-dual-mode.md` (modes),
-  `docs/worklog/archive/05-packaging.md` (install internals),
-  `docs/blockers/` (known risks).
+- Problems: run `gemini doctor` first; for backend behavior see `docs/08-dual-mode.md`.

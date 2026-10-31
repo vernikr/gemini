@@ -69,11 +69,11 @@ def test_setup_router_mode_saves_only_vps_connection_profile(tmp_path, monkeypat
     import gemini_mcp.setup_wizard as sw
 
     monkeypatch.setattr(sw, "deploy_fleet", lambda **kwargs: {"ok": True})
-    rep = run_setup(backend="router", vps_host="fleet.example", vps_user="deploy",
+    rep = run_setup(backend="router", vps_host="test-vps", vps_user="deploy",
                     probe=False, json_out=True)
     profile = home / "fleet.json"
     assert profile.exists() and stat.S_IMODE(profile.stat().st_mode) == 0o600
-    assert json.loads(profile.read_text()) == {"host": "fleet.example", "user": "deploy"}
+    assert json.loads(profile.read_text()) == {"host": "test-vps", "user": "deploy"}
     assert str(profile) in rep["created"]
     assert not (home / ".env").exists()
 
@@ -135,7 +135,7 @@ def _ok_health():
 def test_fleet_auto_deploy_provisions_and_pastes(tmp_path, monkeypatch):
     _home(tmp_path, monkeypatch)
     calls = _fake_sub(monkeypatch, health=[None, _ok_health()])   # down → provisioned
-    rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST",
+    rep = run_setup(backend="router", vps_host="test-vps",
                     projects_dir=str(tmp_path / "projects"), probe=False, json_out=True)
     assert not rep.get("deploy_error")
     assert rep["deploy"]["healthz"]["version"] == __version__
@@ -143,11 +143,11 @@ def test_fleet_auto_deploy_provisions_and_pastes(tmp_path, monkeypatch):
     assert len(clones) == 2                            # both repos, folders were new
     prov = [(c, kw) for c, kw in calls
             if c[0] == "bash" and any("run_remote.sh" in part for part in c)]
-    assert prov and prov[0][1]["env"]["VPS_HOST"] == "YOUR_VPS_HOST" \
+    assert prov and prov[0][1]["env"]["VPS_HOST"] == "test-vps" \
         and prov[0][1]["env"]["VPS_USER"] == "root"
     sn = rep["snippets"]
     assert sn["paste_now"] is True                     # deployed ⇒ paste NOW
-    assert sn["ssh"]["args"][0] == "root@YOUR_VPS_HOST"      # real host baked in
+    assert sn["ssh"]["args"][0] == "root@test-vps"      # supplied host baked in
     assert sn["ssh"]["args"][1] == "/root/.local/bin/gemini"
     assert not (tmp_path / "gmcp" / ".env").exists()   # no keys at rest locally
 
@@ -158,7 +158,7 @@ def test_fleet_skips_provision_when_server_current(tmp_path, monkeypatch):
     for name in ("gemini", "gemini-router"):       # existing clones → pull, no
         (proj / name / ".git").mkdir(parents=True)     # 'already exists' fatal (note 3)
     calls = _fake_sub(monkeypatch, health=[_ok_health()])
-    rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST", projects_dir=str(proj),
+    rep = run_setup(backend="router", vps_host="test-vps", projects_dir=str(proj),
                     probe=False, json_out=True)
     assert not [c for c, _ in calls if c[0] == "bash"]               # no provisioner
     assert not [c for c, _ in calls if c[0] == "git" and c[1] == "clone"]
@@ -173,7 +173,7 @@ def test_fleet_existing_non_git_dir_readable_error(tmp_path, monkeypatch):
     (proj / "gemini").mkdir(parents=True)
     (proj / "gemini" / "junk.txt").write_text("x")
     _fake_sub(monkeypatch, health=[])
-    rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST", projects_dir=str(proj),
+    rep = run_setup(backend="router", vps_host="test-vps", projects_dir=str(proj),
                     probe=False, json_out=True)
     assert "move it aside" in rep["deploy_error"]
     assert rep["snippets"]["paste_now"] is False       # falls back to manual steps
@@ -182,7 +182,7 @@ def test_fleet_existing_non_git_dir_readable_error(tmp_path, monkeypatch):
 def test_fleet_keys_go_via_stdin_not_argv(tmp_path, monkeypatch):
     _home(tmp_path, monkeypatch)
     calls = _fake_sub(monkeypatch, health=[_ok_health()])
-    rep = run_setup(backend="router", vps_host="YOUR_VPS_HOST", keys=K1,
+    rep = run_setup(backend="router", vps_host="test-vps", keys=K1,
                     projects_dir=str(tmp_path / "projects"), probe=False, json_out=True)
     push = [(c, kw) for c, kw in calls if c[0] == "ssh" and "GEMINI_API_KEYS" in c[-1]]
     assert push and push[0][1]["input"].startswith(K1)  # secret travels via stdin
@@ -214,7 +214,7 @@ def test_uninstall_guard_and_removal(tmp_path, monkeypatch):
     home = _home(tmp_path, monkeypatch)
     run_setup(backend="direct", keys=K1, probe=False, json_out=True)
     (home / "state.db").write_bytes(b"sqlite")            # local ledger (0.8.1)
-    (home / "fleet.json").write_text('{"host":"fleet.example","user":"root"}')
+    (home / "fleet.json").write_text('{"host":"test-vps","user":"root"}')
     guard = run_uninstall(yes=False)
     assert guard["error"] == "confirm_required" and len(guard["would_remove"]) == 4
     assert (home / ".env").exists() and (home / "fleet.json").exists()
@@ -289,13 +289,13 @@ def test_render_report_mode_guidance(tmp_path, monkeypatch):
 
     # fleet, auto-deploy SUCCEEDED → same green paste-now block, real host inside
     _fake_sub(monkeypatch, health=[_ok_health()])
-    rep_ok = run_setup(backend="router", vps_host="YOUR_VPS_HOST", force=True,
+    rep_ok = run_setup(backend="router", vps_host="test-vps", force=True,
                        projects_dir=str(tmp_path / "p2"), probe=False, json_out=True)
     buf = io.StringIO()
     render_report(rep_ok, Console(file=buf, force_terminal=False, width=100))
     txt = buf.getvalue()
     assert "Do NOT paste" not in txt and "<YOUR_VPS>" not in txt
-    assert "root@YOUR_VPS_HOST" in txt and "Do this now:" in txt
+    assert "root@test-vps" in txt and "Do this now:" in txt
 
     # fleet, no host → yellow manual fallback (numbered, self-contained)
     rep_f = run_setup(backend="router", json_out=True, force=True)

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_remote.sh — rsync-based deploy from the workstation (deployment notes pattern: NO git
+# run_remote.sh — rsync-based deploy from the workstation (host safety requirements pattern: NO git
 # clone on the VPS). Requires: ssh access as a sudo-capable user, rsync on both ends.
 #
 #   bash scripts/run_remote.sh setup    # rsync both repos + provision (idempotent)
@@ -13,15 +13,14 @@
 # release.yml deploy job → deploy-tools). setup/deploy here sync SOURCE + config
 # (config.yaml, scripts, prompts) and keep the tool binary at the latest release.
 #
-# Env: VPS_USER — SSH login user (default root: the VPS has NO 'agent' user — verified
-# on live server 2026-10-08); APP_USER — service/venv owner (default = VPS_USER; set
-# APP_USER=<user> later to run under a dedicated non-root user if one is created).
-# VPS_HOST default YOUR_VPS_HOST. Non-standard SSH port/keys: via ~/.ssh/config for host.
+# Env: VPS_HOST (required), VPS_USER (SSH login user; default root), APP_USER (service/venv
+# owner; defaults to VPS_USER). Non-standard SSH ports/keys: configure them in ~/.ssh/config.
 set -euo pipefail
 
 VPS_USER="${VPS_USER:-root}"
 APP_USER="${APP_USER:-$VPS_USER}"
-VPS_HOST="${VPS_HOST:-YOUR_VPS_HOST}"
+VPS_HOST="${VPS_HOST:-}"
+[[ -n "$VPS_HOST" ]] || { echo "set VPS_HOST to your server hostname or IP" >&2; exit 2; }
 DEST="$VPS_USER@$VPS_HOST"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"          # gemini repo
 ROUTER_LOCAL="$(dirname "$HERE")/gemini-router"                  # sibling checkout

@@ -10,8 +10,8 @@ Runs on a small VPS; a local Freebuff Desktop agent sends huge bodies to it and 
 a compact consolidated result — the agent's own context stays clean.
 
 - Cascading Flash chain (newest first, deprecated aliases excluded) via
-  [gemini-router](https://github.com/vernikr/gemini-router) (per key×model RPD/RPM/TPM
-  ledger shared with `external-consumer`).
+  [gemini-router](https://github.com/vernikr/gemini-router) with per-key×model
+  RPD/RPM/TPM accounting in a persistent ledger.
 - Over-limit bodies: split into overlapping chunks, each marked `[CHUNK N/M]`, analyzed
   separately, then consolidated (recursively if needed).
 - `thinking_level` default **medium**, per-request override; opt-in overflow
@@ -78,9 +78,9 @@ npx -y @vernikr/gemini setup --backend router --vps-host <ip> \
   --write-client freebuff --json
 ```
 
-Fleet prerequisites (each failure message tells you how to check): GitHub auth for
-the private repos (`git ls-remote https://github.com/vernikr/gemini`), passwordless
-`ssh <user>@<ip>`, bash+rsync, macOS/Linux. No env vars needed afterwards: the gateway
+Fleet prerequisites (each failure message tells you how to check): `git` access to the
+public source repositories, passwordless `ssh <user>@<host>`, bash+rsync, macOS/Linux.
+No env vars needed afterwards: the gateway
 auto-discovers `~/.config/gemini/`.
 
 For local speech synthesis, run `gemini tts notes.md` after setup. It writes one mono
@@ -122,8 +122,6 @@ GEMINI_API_KEYS=... uv run gemini setup|quota|calls|logs|prune|doctor|smoke
 | Consumer guide (client JSON, direct mode) | [`docs/06-consumer.md`](docs/06-consumer.md) |
 | Dual-mode backend design | [`docs/08-dual-mode.md`](docs/08-dual-mode.md) |
 | CI/CD and release mechanics | [`docs/09-ci.md`](docs/09-ci.md) |
-| Risks | [`docs/blockers/`](docs/blockers/) |
-| Superseded stage docs and ops logs | [`docs/worklog/archive/`](docs/worklog/archive/) |
 
 ## Planned usage (Freebuff, `~/.agents/mcp.json`)
 
@@ -131,8 +129,8 @@ GEMINI_API_KEYS=... uv run gemini setup|quota|calls|logs|prune|doctor|smoke
 { "mcpServers": {
     "gemini": {                       // A) SSH-stdio — primary, encrypted, no open ports
       "command": "ssh",
-      "args": ["root@YOUR_VPS_HOST", "~/.local/bin/gemini", "stdio"] },
-    "gemini-http": {                  // B) HTTP via `ssh -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST`
+      "args": ["root@<YOUR_VPS_HOST>", "~/.local/bin/gemini", "stdio"] },
+    "gemini-http": {                  // B) HTTP via `ssh -L 8790:127.0.0.1:8790 root@<YOUR_VPS_HOST>`
       "type": "http", "url": "http://127.0.0.1:8790/mcp",
       "headers": { "Authorization": "Bearer $GEMINI_MCP_TOKEN" } } } }
 ```
@@ -156,12 +154,12 @@ bash scripts/run_remote.sh status|logs
 
 Freebuff Desktop wiring (SSH-stdio and HTTP-via-tunnel snippets, verification steps):
 [docs/freebuff-wiring.md](docs/freebuff-wiring.md). The daemon never leaves
-`127.0.0.1:8790`; no firewall changes are made (deployment notes compliant).
+`127.0.0.1:8790`; no firewall changes are made (host safety requirements compliant).
 
 ## Ops (after M4)
 
 ```bash
-ssh root@YOUR_VPS_HOST
+ssh root@<YOUR_VPS_HOST>
 sudo systemctl status gemini          # daemon (HTTP)
 ~/.local/bin/gemini quota    # what's left, per key×model (on the VPS, as its user)
 ~/.local/bin/gemini logs -f  # live app log

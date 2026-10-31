@@ -151,7 +151,7 @@ def _client_snippets(backend: str, fleet: dict | None = None,
 
 
 def _short_path(p: str | Path) -> str:
-    """'~/projects' → '~/projects' — prompt defaults read as paths, not noise."""
+    """Normalize a user-home path without displaying machine-specific details."""
     s = str(Path(p).expanduser())
     home = str(Path.home())
     return "~" + s[len(home):] if s == home or s.startswith(home + os.sep) else s

@@ -1,8 +1,6 @@
 name: release
-# Dual-publish on tag v*: test (public-registry deps) → PyPI (trusted publishing,
-# OIDC — no API token in secrets) → npm shim (provenance) → consumer smoke against
-# the live registries. One-time store setup: docs/09-ci.md. Manual fallback (until
-# stores are configured): docs/worklog/archive/05-packaging.md "Publishing".
+# Publish the Python package and npm bootstrap from matching SemVer tags, then verify
+# that consumers can install both artifacts from their public registries.
 on:
   push:
     tags: ["v*"]
@@ -11,12 +9,8 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-      # PyPI rejects an OIDC identity that tries to CREATE a project (400
-      # "Non-user identities cannot create new projects"), and the trust record is
-      # keyed by repository slug — so renaming the repo invalidates the publisher
-      # for the old dist name and leaves the new one unregistered. Both are manual:
-      # pypi.org/manage/account/publishing/, matching owner, repo, workflow filename
-      # and the `pypi` environment below. Publish fails here, and only here.
+      # Trusted publishing must be configured for this project, repository and
+      # workflow environment in the PyPI project settings.
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -75,9 +69,7 @@ jobs:
           npm access list packages || echo "::warning::the token lists no packages — it lacks rights on this scope"
       - name: Publish shim
         working-directory: packaging/npm
-        # no --provenance: sigstore attestation requires a PUBLIC source repo (E422);
-        # re-enable if/when the repo goes public (then id-token:write is already set)
-        run: npm publish --access public
+        run: npm publish --access public --provenance
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
   smoke:
@@ -91,12 +83,7 @@ jobs:
       - name: Consumer E2E from the public registries
         run: |
           V="${GITHUB_REF_NAME#v}"
-          # The gate is the REAL consumer command, retried. v0.20.0 taught us the JSON
-          # API can be fresh while uv's view of /simple/ is not; v0.20.1 taught us a
-          # curl of the /simple/ HTML page can be fresh while uv's JSON representation
-          # of that same page (different Fastly cache object) is not. Metadata polls
-          # therefore never decide anything again — a failed resolve costs ~1 s, so
-          # retry the command that a consumer actually runs, and stop on its success.
+          # Retry actual consumer installs to allow package-index propagation.
           try() {           # $1 = registry name; rest = consumer command
             local name="$1"; shift
             for i in $(seq 1 40); do

@@ -10,12 +10,12 @@ unreliably — Freebuff bug #957); fully restart Freebuff after editing.
 { "mcpServers": {
     "gemini": {
       "command": "ssh",
-      "args": ["root@YOUR_VPS_HOST",
+      "args": ["root@<YOUR_VPS_HOST>",
                "~/.local/bin/gemini", "stdio"]
     } } }
 ```
 
-Requirements: key-based SSH from the workstation (`ssh-copy-id root@YOUR_VPS_HOST`).
+Requirements: key-based SSH from the workstation (`ssh-copy-id root@<YOUR_VPS_HOST>`).
 No token needed — the transport is SSH. Each Freebuff session spawns its own process;
 all sessions share `/opt/apps/shared/gemini-router/state.db`, so RPD/RPM accounting
 stays global. The process bootstraps itself: it anchors to the project
@@ -39,7 +39,7 @@ Manual fallback (single session, dies on sleep — avoid):
 
 ```bash
 ssh -f -N -o ServerAliveInterval=30 -o ServerAliveCountMax=4 \
-    -o ExitOnForwardFailure=yes -L 8790:127.0.0.1:8790 root@YOUR_VPS_HOST
+    -o ExitOnForwardFailure=yes -L 8790:127.0.0.1:8790 root@<YOUR_VPS_HOST>
 ```
 
 Then in `~/.agents/mcp.json`:

@@ -21,9 +21,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      # Public-registry deps only: gemini-router is on PyPI (>=0.1.1), so CI needs no
-      # private-git auth (GH_PAT_READ is obsolete). UV_NO_SOURCES=1 skips the dev-only
-      # tool.uv.sources git pin — CI validates exactly what consumers install.
+      # Public-registry dependencies only: CI validates the same packages consumers install.
+      # UV_NO_SOURCES=1 skips the development-only source override.
       - name: Install deps
         run: |
           uv venv .venv-ci
