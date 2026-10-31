@@ -8,7 +8,6 @@ import sys
 from pathlib import Path
 
 from gemini_router import Router
-from gemini_router.cli_progress import tts_progress
 from gemini_router.config import Config as RouterConfig
 from rich.prompt import Prompt
 
@@ -16,6 +15,7 @@ from .backends import make_routers, resolve_mode
 from .config import AppCfg
 from .fleet_profile import FleetProfile, load_profile, save_profile
 from .tts_client import FleetProxy, ServerProxyTunnel
+from .tts_progress import tts_progress
 
 
 def _profile(args, console) -> FleetProfile:
