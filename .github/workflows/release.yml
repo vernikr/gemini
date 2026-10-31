@@ -103,8 +103,25 @@ jobs:
   deploy:
     needs: pypi                             # deploy only what is already on PyPI
     if: startsWith(github.ref, 'refs/tags/v')
-    uses: vernikr/browser-agent/.github/workflows/deploy-ssh.yml@main
-    with:
-      app: gemini                       # → /etc/deploy-tools.d/gemini.conf on the VPS
-      tag: ${{ github.ref_name }}
-    secrets: inherit                        # DEPLOY_SSH_KEY / DEPLOY_HOST / DEPLOY_USER
+    runs-on: ubuntu-latest
+    environment:
+      name: prod
+    steps:
+      - name: Deploy exact version to production
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$DEPLOY_SSH_KEY" > ~/.ssh/ci_deploy_key
+          chmod 600 ~/.ssh/ci_deploy_key
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+          version="${GITHUB_REF_NAME#v}"
+          ssh -i ~/.ssh/ci_deploy_key \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile=~/.ssh/known_hosts \
+            "$DEPLOY_USER@$DEPLOY_HOST" "deploy gemini $version"
