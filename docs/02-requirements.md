@@ -114,7 +114,7 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   Direct mode uses the local key pool. Router mode uses the VPS pool: setup stores only
   the VPS host/user in a mode-0600 local profile; the command reads the proxy token over
   SSH into memory, opens a temporary loopback-only tunnel, and always closes it. Never
-  persist, print or log the proxy token.
+  persist, print or log the proxy token. The terminal indicator MUST stay on one line, show chunk position, a monotonic estimated percentage and approximate remaining time; it MUST retain a separate waiting status for quota gates. JSON output MUST remain free of progress text.
 
 ## C. Routing & quota (gemini-router)
 
