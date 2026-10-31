@@ -68,5 +68,6 @@ def tts_progress(
             if eta_s is not None:
                 description += f" · ~{_format_eta(eta_s)}"
             progress.update(task, completed=completed, description=description)
+            progress.refresh()
 
         yield report
