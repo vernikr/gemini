@@ -9,8 +9,6 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-      # Trusted publishing must be configured for this project, repository and
-      # workflow environment in the PyPI project settings.
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -40,10 +38,21 @@ jobs:
       - uses: astral-sh/setup-uv@v5
       - name: Lockstep guard — pyproject version must equal the tag
         run: grep -q "^version = \"${GITHUB_REF_NAME#v}\"$" pyproject.toml
-      - run: rm -rf dist && uv build      # dist hygiene: never ship stale artifacts
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Check whether this version is already on PyPI
+        id: pypi-version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if curl -fsS "https://pypi.org/pypi/vernikr-gemini/$version/json" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.pypi-version.outputs.exists != 'true'
+        run: rm -rf dist && uv build
+      - if: steps.pypi-version.outputs.exists != 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
         with:
-          skip-existing: true             # re-tag/re-run safe: files already on PyPI pass
+          skip-existing: true
   npm:
     needs: pypi                           # shim pins ==<version>: PyPI artifact first
     runs-on: ubuntu-latest
@@ -59,10 +68,20 @@ jobs:
       - name: Lockstep guard — package.json version must equal the tag
         working-directory: packaging/npm
         run: test "$(node -p "require('./package.json').version")" = "${GITHUB_REF_NAME#v}"
+      - name: Check whether this version is already on npm
+        id: npm-version
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if curl -fsS "https://registry.npmjs.org/@vernikr%2Fgemini/$version" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
       # npm answers a scoped PUT it refuses with 404, which reads like "no such
       # package". Name the real cause before the publish, or every failure here costs
       # another round trip of guessing.
       - name: Check npm access
+        if: steps.npm-version.outputs.exists != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
@@ -73,6 +92,7 @@ jobs:
           fi
           npm access list packages || echo "::warning::the token lists no packages — it lacks rights on this scope"
       - name: Publish shim
+        if: steps.npm-version.outputs.exists != 'true'
         working-directory: packaging/npm
         run: npm publish --access public --provenance
         env:
