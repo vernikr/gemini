@@ -223,7 +223,7 @@ wheels = [
 
 [[package]]
 name = "gemini-router"
-version = "0.14.0"
+version = "0.14.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
@@ -231,9 +231,9 @@ dependencies = [
     { name = "pyyaml" },
     { name = "rich" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a3/94/64b252689725caea1aab76e61a5e2b48de80150a54bb25c00ac3181cf630/gemini_router-0.14.0.tar.gz", hash = "sha256:857468ed4089ad8e1304ea9431de2aeea39e816d9c1818ad620c6171f4f7e2c2", size = 189494, upload-time = "2026-10-31T19:01:51.775Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/41/44/90108c48f5456b12a9c6df989c3a42728092ae372939a9e44483f9824b7f/gemini_router-0.14.1.tar.gz", hash = "sha256:c96f51808586841b0cc545d21830c6cb2e1bccc17fd99150db77104bd89fbee3", size = 189989, upload-time = "2026-10-31T20:23:28.115Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6f/35/5a8c5ce7f33bac2eba208de318d831dd2e299f94b3280b4037bdde2e9988/gemini_router-0.14.0-py3-none-any.whl", hash = "sha256:40b166c7cd1cae4abbb9331d26a183f68844466a694790932d2fafb1652aef0e", size = 92913, upload-time = "2026-10-31T19:01:50.256Z" },
+    { url = "https://files.pythonhosted.org/packages/45/89/bb820520562c51b6479d8894377c41b6287b3ec53c2ab4c885ad8be0a565/gemini_router-0.14.1-py3-none-any.whl", hash = "sha256:cc19451095680d8ade87cd80bfda606c531e537256dc4bcee5b162446bc4db5e", size = 93095, upload-time = "2026-10-31T20:23:26.82Z" },
 ]
 
 [[package]]
