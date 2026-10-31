@@ -13,8 +13,9 @@ use Conventional Commits and SemVer, and update documentation with behavior chan
 - The npm launcher checks PyPI for a newer gateway core. `--no-update` and
   `GEMINI_AUTO_UPDATE=0` disable the check; when the registry is unavailable it uses the
   version paired with the launcher.
-- TTS terminal progress is based on completed synthesis chunks and MP3 encoding, not time
-  estimates. JSON output remains machine-readable.
+- TTS terminal progress is monotonic and compact: completed chunks are measured, the active
+  chunk uses capped time-based pseudo-progress, ETA adapts to observed throughput, and MP3
+  encoding follows ffmpeg progress. JSON output remains machine-readable.
 
 ## Commands
 - `uv sync --extra dev` · `uv run pytest` · `uv run ruff check src tests`
