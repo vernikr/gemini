@@ -1,6 +1,6 @@
 """`gemini setup` — idempotent consumer onboarding.
 
-Writes $GEMINI_MCP_HOME (~/.config/gemini)/{config.yaml,.env 0600}, optionally
+Writes $GEMINI_MCP_HOME (~/.config/gemini)/{config.yaml,.env 0600,fleet.json}, optionally
 probes keys live (listModels on an in-memory ledger — zero disk state, zero RPD spend),
 prints ready-to-paste client snippets. Non-interactive with --json/--keys/--backend;
 interactive otherwise (one fleet-vs-simple question, masked key paste). Re-run = no-op
@@ -25,6 +25,7 @@ from gemini_router.config import key_id
 
 from . import __version__
 from .config import config_home
+from .fleet_profile import profile_path, save_profile
 
 FLEET_REPOS = ("gemini", "gemini-router")     # github.com/vernikr/<name>, private
 FLEET_HEALTHZ = "curl -fsS --max-time 3 http://127.0.0.1:8790/healthz"
@@ -396,6 +397,11 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
 
     home.mkdir(parents=True, exist_ok=True)
     env_path, cfg_path = home / ".env", home / "config.yaml"
+    if backend == "router" and fleet.get("host"):
+        profile = profile_path()
+        existed = profile.exists()
+        save_profile(fleet["host"], fleet["user"])
+        report["overwritten" if existed else "created"].append(str(profile))
 
     key_list = [k.strip() for k in (keys or os.environ.get("GEMINI_API_KEYS", "")
                                     ).split(",") if k.strip()]
@@ -491,7 +497,7 @@ def run_setup(*, backend: str | None = None, keys: str | None = None,
 
 def run_uninstall(*, yes: bool = False, json_out: bool = False) -> dict:
     home = config_home()
-    targets = [home / ".env", home / "config.yaml", home / "state.db",
+    targets = [home / ".env", home / "config.yaml", home / "fleet.json", home / "state.db",
                home / "state.db-wal", home / "state.db-shm"]
     present = [p for p in targets if p.exists()]
     report: dict = {"tool": "uninstall", "config_home": str(home),

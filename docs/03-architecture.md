@@ -82,15 +82,18 @@ gemini/
 ├── config.yaml               # all tunables (limits, chain, chunking, retention, thinking default)
 ├── .env.example              # GEMINI_API_KEYS, GEMINI_MCP_TOKEN, GEMINI_ROUTER_STATE, …
 ├── src/gemini_mcp/
-│   ├── server.py             # MCPServer (SDK v2): tools, resource, REST routes, bearer middleware
+│   ├── server.py             # MCPServer (SDK v2), resources, REST routes, bearer middleware
 │   ├── tools.py              # analyze_large, gemini_generate, quota_status, router_logs
 │   ├── pipeline.py           # measure → plan → budget pre-flight → chunk loop → consolidate
 │   ├── chunker.py            # token-aware splitter (paragraph>sentence>line), overlap windows
 │   ├── prompts.py            # chunk service marker, consolidation & recursive-consolidation templates
 │   ├── progress.py           # RouterEvent+pipeline stages → report_progress / ctx.info / trace
 │   ├── logging_setup.py      # rich console + RotatingFileHandler + JSONL audit + redaction + retention
-│   └── cli.py                # gemini serve|stdio|quota|calls|logs|prune|doctor
-│                             # (REST /v1/* + /healthz live in server.py custom routes)
+│   ├── cli.py                # gemini serve|stdio|quota|calls|logs|prune|doctor|tts
+│   ├── tts_cli.py            # local MP3 CLI; direct keys or short-lived VPS proxy tunnel
+│   ├── tts_client.py         # SSH token acquisition + loopback-only tunnel lifecycle
+│   ├── fleet_profile.py     # mode-0600 host/user profile (no credentials)
+│   └── fleet_profile.py      # mode-0600 host/user profile (no credentials)
 ├── scripts/                  # setup_server.sh (idempotent), run_remote.sh (rsync deploy), gen_token.sh
 ├── tests/                    # pipeline & chunker units (fake token counter), MCP e2e via in-memory client
 └── docs/                     # this stage set + blockers + freebuff-wiring.md

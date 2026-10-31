@@ -393,6 +393,7 @@ def main(argv: list[str] | None = None) -> int:
   gemini keys                  the key pool: fingerprints, where it lives
   gemini keys add <key>        add a key: validated, probed free, service restarted
   gemini analyze_file          (MCP tool) read a PDF/image/audio file
+  gemini tts <file.txt|file.md> make an MP3 via the configured backend
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", help="config.yaml path (or GEMINI_MCP_CONFIG)")
@@ -485,6 +486,19 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("analyze", help="chunked analysis of a massive text body "
                                        "(MCP analyze_large). Body from --body-file or stdin")
     _add_compute_flags(p)
+    p = sub.add_parser("tts", help="synthesize a local TXT/Markdown file into one MP3")
+    p.add_argument("file", type=Path)
+    p.add_argument("-o", "--output", type=Path)
+    p.add_argument("--voice", help="optional single-speaker voice")
+    p.add_argument("--style", help="optional speech direction")
+    p.add_argument("--bitrate", type=int, default=128, help="MP3 bitrate in kbps")
+    p.add_argument("--no-wait", action="store_true", help="fail fast on minute quota gates")
+    p.add_argument("--request-id", help="idempotency key for the synthesis job")
+    p.add_argument("--backend", choices=["direct", "router"],
+                   help="override the configured backend for this command")
+    p.add_argument("--vps-host", help="router mode: override/save the fleet host")
+    p.add_argument("--vps-user", help="router mode: override/save the SSH user")
+    p.add_argument("--json", action="store_true")
 
     args = ap.parse_args(argv)
     if not args.cmd:                              # bare invocation: show the way in
@@ -536,6 +550,10 @@ def main(argv: list[str] | None = None) -> int:
             return _run_doctor(app_cfg, router_cfg, args)
         if args.cmd == "smoke":
             return _run_smoke(app_cfg, router_cfg, args)
+        if args.cmd == "tts":
+            from .tts_cli import run_tts
+
+            return run_tts(args, app_cfg, router_cfg, console)
         if args.cmd in ("ask", "analyze"):
             from .compute_cmd import run_analyze, run_analyze_file, run_ask
 

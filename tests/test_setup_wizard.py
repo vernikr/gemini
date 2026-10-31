@@ -64,12 +64,27 @@ def test_setup_json_requires_keys(tmp_path, monkeypatch):
     assert rep["error"].startswith("keys required")
 
 
+def test_setup_router_mode_saves_only_vps_connection_profile(tmp_path, monkeypatch):
+    home = _home(tmp_path, monkeypatch)
+    import gemini_mcp.setup_wizard as sw
+
+    monkeypatch.setattr(sw, "deploy_fleet", lambda **kwargs: {"ok": True})
+    rep = run_setup(backend="router", vps_host="fleet.example", vps_user="deploy",
+                    probe=False, json_out=True)
+    profile = home / "fleet.json"
+    assert profile.exists() and stat.S_IMODE(profile.stat().st_mode) == 0o600
+    assert json.loads(profile.read_text()) == {"host": "fleet.example", "user": "deploy"}
+    assert str(profile) in rep["created"]
+    assert not (home / ".env").exists()
+
+
 def test_setup_router_mode_no_env(tmp_path, monkeypatch):
     home = _home(tmp_path, monkeypatch)
     monkeypatch.delenv("VPS_HOST", raising=False)
     rep = run_setup(backend="router", json_out=True)
     assert "backend: router" in (home / "config.yaml").read_text()
     assert not (home / ".env").exists()
+    assert not (home / "fleet.json").exists()
     sn = rep["snippets"]
     assert sn["paste_now"] is False and sn["ssh"]["command"] == "ssh"
     assert sn["deploy_steps"] and "run_remote.sh" in " ".join(sn["deploy_steps"])
@@ -199,11 +214,12 @@ def test_uninstall_guard_and_removal(tmp_path, monkeypatch):
     home = _home(tmp_path, monkeypatch)
     run_setup(backend="direct", keys=K1, probe=False, json_out=True)
     (home / "state.db").write_bytes(b"sqlite")            # local ledger (0.8.1)
+    (home / "fleet.json").write_text('{"host":"fleet.example","user":"root"}')
     guard = run_uninstall(yes=False)
-    assert guard["error"] == "confirm_required" and len(guard["would_remove"]) == 3
-    assert (home / ".env").exists()
+    assert guard["error"] == "confirm_required" and len(guard["would_remove"]) == 4
+    assert (home / ".env").exists() and (home / "fleet.json").exists()
     rep = run_uninstall(yes=True)
-    assert len(rep["removed"]) == 3 and not home.exists()  # empty dir cleaned up
+    assert len(rep["removed"]) == 4 and not home.exists()  # empty dir cleaned up
     assert run_uninstall(yes=True)["note"] == "nothing to remove"
 
 

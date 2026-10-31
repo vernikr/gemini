@@ -29,6 +29,30 @@ freebuff --json` (machine-readable report: `ok`, `steps`, `verify_prompt`, and e
 failure with a `fix` — built for AI agents; see README §Quick start).
 Undo everything: `… uninstall --yes`.
 
+## Local text-to-speech CLI
+
+```bash
+gemini tts notes.md                         # writes notes.mp3 next to the source
+gemini tts notes.txt --voice Kore --style "Warm, measured delivery"
+gemini tts notes.md --output ~/Audio/notes.mp3 --bitrate 128
+```
+
+Only UTF-8 `.txt` and `.md` files are accepted. The command produces one mono MP3 with
+`gemini-3.8-flash-tts`; voice and style are optional, the default bitrate is 128 kbps,
+and `--no-wait` opts out of waiting for a minute quota window. Multi-speaker output and
+streaming are not supported. Paragraphs are chunked first, then sentences; the complete
+file is preflighted against the TTS quota before any audio is generated. The completed
+MP3 stays at the selected local path (at least 24 hours); failed synthesis removes partial
+output. The local machine needs `ffmpeg` for MP3 encoding.
+
+In **direct mode**, the local API-key pool is used. In **router mode**, the VPS key pool
+is used: `setup --backend router` stores the VPS host and SSH user (no credentials) in
+`~/.config/gemini/fleet.json`. The CLI reads the proxy token over SSH into memory, opens
+a temporary tunnel bound only to `127.0.0.1`, and closes it when the job ends. The token
+is never written to disk or printed. SSH public-key access and a trusted host key must
+already be configured. Override the saved target for one command with `--vps-host` and
+`--vps-user`.
+
 ## 2. Add to your MCP client (JSON)
 
 `setup` **prints** the JSON block and can also **write** it itself:

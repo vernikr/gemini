@@ -39,6 +39,14 @@ make_routers(): → (router, router_optimal, mode); direct mode points BOTH inst
 | `gemini quota` | live shared table | live local table + ledger path note |
 | `prune` / `doctor` | full (SQLite) | full (local SQLite); doctor prints local state stats + listModels probe |
 | Multi-client fairness | enforced across machines | enforced across processes on ONE machine |
+| `gemini tts` CLI | VPS key pool via an ephemeral loopback-only SSH tunnel | local key pool |
+
+The TTS command is a local CLI (not an MCP tool). In router mode it retrieves the proxy
+bearer token over SSH for the duration of the command, starts a tunnel bound to
+`127.0.0.1`, sends synthesis requests through the VPS proxy, and closes the tunnel on
+success or failure. `fleet.json` stores only the host and SSH user with mode `0600`; the
+token is memory-only. In direct mode it uses the local key pool and ledger. See
+[the consumer guide](06-consumer.md#local-text-to-speech-cli) for flags and setup.
 
 ## AX parity (non-negotiables, all shipped)
 

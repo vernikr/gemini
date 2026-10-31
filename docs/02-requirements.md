@@ -104,6 +104,19 @@ Numeric defaults live in `config.yaml` (single source); this doc references key 
   are exempt. Other degraded successes carry ⚠️; failed tool calls are ⛔️ in the
   agent-facing instructions, with a plain-language remedy. Clean success stays clean.
 
+- FR-B16: `gemini tts <file.txt|file.md>` MUST synthesize one local mono MP3 with
+  `gemini-3.8-flash-tts` through `gemini-router` 0.13+. Voice and style are optional;
+  multi-speaker and streaming are out of scope. Chunk at paragraph boundaries, then
+  sentence boundaries. Preflight the whole file against the 3 RPM / 10K input TPM /
+  10 RPD limits before synthesis; do not leave a partial output when the complete file
+  cannot fit. Default to 128 kbps, save the MP3 beside the source unless `--output` is
+  passed. The completed local MP3 MUST remain at the selected path for at least 24 hours
+  for delivery recovery; failures MUST remove any partial output.
+  Direct mode uses the local key pool. Router mode uses the VPS pool: setup stores only
+  the VPS host/user in a mode-0600 local profile; the command reads the proxy token over
+  SSH into memory, opens a temporary loopback-only tunnel, and always closes it. Never
+  persist, print or log the proxy token.
+
 ## C. Routing & quota (gemini-router)
 
 - **FR-C1** MUST route through the configured Flash chain (newest first; deprecated

@@ -50,7 +50,7 @@ def test_help_lists_the_recently_added_commands(capsys):
         main(["--help"])
     out = capsys.readouterr().out
     assert e.value.code == 0
-    for word in ("keys", "smoke", "prune", "doctor"):
+    for word in ("keys", "smoke", "prune", "doctor", "tts"):
         assert word in out
 
 

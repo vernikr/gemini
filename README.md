@@ -83,6 +83,12 @@ the private repos (`git ls-remote https://github.com/vernikr/gemini`), passwordl
 `ssh <user>@<ip>`, bash+rsync, macOS/Linux. No env vars needed afterwards: the gateway
 auto-discovers `~/.config/gemini/`.
 
+For local speech synthesis, run `gemini tts notes.md` after setup. It writes one mono
+MP3 beside the `.txt`/`.md` source (128 kbps default; optional `--voice`, `--style`,
+`--output`, `--bitrate`). Direct mode uses local keys; router mode uses the VPS pool via
+an ephemeral localhost-only SSH tunnel. Requires local `ffmpeg`; see
+[`docs/06-consumer.md`](docs/06-consumer.md#local-text-to-speech-cli).
+
 Analyzing a FILE (agent): never read it yourself and never inline its contents into a
 prompt. Call `file_upload_ticket(filename, size_bytes)` → HTTP PUT the raw bytes to
 `upload_url` → `analyze_file(upload_id, task)`. Text documents are extracted and chunked

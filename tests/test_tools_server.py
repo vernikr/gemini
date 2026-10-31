@@ -86,7 +86,7 @@ async def test_quota_status_and_logs_with_real_router(tmp_path):
     q = await quota_status_tool(deps)
     assert q["recommended_model"] == "gemini-3.8-flash"
     assert "T" in q["reset_eta_pt"]
-    assert len(q["rows"]) == 3                      # chain(2) + flash-lite, 1 key
+    assert len(q["rows"]) == 4                      # chain(2) + flash-lite + TTS, 1 key
 
     rid = router.ledger.plan(key_id="ab", model="gemini-3.8-flash", kind="single",
                              est_tokens=10, request_id="r1", source="mcp")
